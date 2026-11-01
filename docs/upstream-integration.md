@@ -20,6 +20,11 @@ are excluded. Both histories are retained by the merge.
   VR options, diagnostics and controller calibration retain the ASI INI;
   weapon/vehicle profiles retain their own files. The old backend file is a
   migration input, not a live backend switch.
+  The old CFG's `Windowed` and `BorderlessWindowed` keys are captured before the
+  upstream loader rewrites it and converted to `WindowMode`. An explicit new
+  `WindowMode` remains authoritative. This preserves borderless presentation
+  across an upgrade and avoids exclusive-fullscreen focus loss stopping VR.
+  Fresh configurations default to borderless windowed fullscreen (mode 2).
 - Upstream's menu API retains the VR tab, pointer, map-waypoint input and
   custom slider labels/values/descriptions. VR spacers use upstream empty rows;
   custom VR sliders suppress duplicate native numeric text.
@@ -52,5 +57,9 @@ captures render apartment geometry, and the VR menu registers. The headset
 was not focused during this capture; it does not establish controller or
 comfort acceptance. The VR opt-out startup check reaches game callbacks with no OpenXR instance,
 session or eye images on the retained DXVK backend. The installed INI is restored
-byte-for-byte afterward. Further headset, flat-screen gameplay and episode
-checks are tracked in the issue. No performance improvement is claimed.
+byte-for-byte afterward. Headset checks pass ordinary rendering, tracked hands,
+VR menu/pointer/sliders, locomotion and weapon/vehicle interactions. A follow-up
+alt-tab check passes with the migrated borderless window mode. Legacy window-mode
+mapping tests pass, including preservation of explicit new-format choices, and
+the settings validator accepts the new borderless default. Broader flat-screen
+gameplay and episode checks remain pending. No performance improvement is claimed.

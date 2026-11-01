@@ -48,7 +48,7 @@
       "page": "game", "group": "@group.interface", "control": [ "switch", "cycler" ]
     },
     {
-      "id": "MAIN.WindowMode", "type": "choice", "default": 0,
+      "id": "MAIN.WindowMode", "type": "choice", "default": 2,
       "choices": [ { "value": 0, "label": "@window.fullscreen" }, { "value": 1, "label": "@window.windowed" }, { "value": 2, "label": "@window.borderless" } ],
       "label": "@WindowMode", "description": "@MAIN.WindowMode.description",
       "page": "game", "group": "@group.window", "control": [ "cycler", "dropdown" ]

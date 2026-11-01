@@ -9,6 +9,7 @@ module;
 #include <atomic>
 #include <stdexcept>
 #include <asi_settings/asi_settings.hpp>
+#include "includes/legacywindowmode.hpp"
 #include <upscaler/graphics_api.h>
 
 export module settings;
@@ -291,12 +292,18 @@ export asi_settings::Plugin& SettingsPlugin()
         GetModuleFileNameW(module,filename,DWORD(std::size(filename)));locations.plugin=filename;
         GetModuleFileNameW(nullptr,filename,DWORD(std::size(filename)));locations.exe=filename;
         bool importLegacy=false;
+        std::optional<int> legacyWindowMode;
         if(asi_settings::ReadModule(module,description))
         {
             const auto files=asi_settings::ResolveStorageFiles(description.description,locations);
             std::error_code ec;
             importLegacy=!std::filesystem::exists(files.file,ec) && !std::filesystem::exists(files.fallback,ec) &&
                 !std::filesystem::exists(files.virtualStore,ec);
+            // Plugin::Load rewrites incomplete cfg files, removing the old names.
+            // Capture renamed values first, including when an old cfg already exists.
+            CIniReader legacy(importLegacy ? CIniReader("").GetIniPath():asi_settings::NewestCfg(files));
+            legacyWindowMode=LegacyWindowMode::Import(legacy.ReadInteger("MAIN","WindowMode",-1),
+                legacy.ReadInteger("MAIN","Windowed",-1),legacy.ReadInteger("MAIN","BorderlessWindowed",1));
         }
         if (!plugin.Load())
             OutputDebugStringA(("GTAIV.EFLC.FusionFix: settings unavailable, " + plugin.Error() + "\n").c_str());
@@ -318,6 +325,7 @@ export asi_settings::Plugin& SettingsPlugin()
                 if(api==0 || api==1)plugin.Set("MAIN.GraphicsAPI",std::to_string(api),false);
                 plugin.Save();
             }
+            if(legacyWindowMode)plugin.Set("MAIN.WindowMode",std::to_string(*legacyWindowMode),true);
             asi_settings::LiveLink::Start();
         }
         return plugin.Loaded();
