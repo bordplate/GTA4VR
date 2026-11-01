@@ -9,6 +9,8 @@ module;
 #define XR_USE_GRAPHICS_API_VULKAN
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
+#include "includes/vrruntimevulkan.hpp"
+#include "includes/vrcontrollerbindings.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -148,6 +150,8 @@ namespace
         PFN_xrGetActionStateFloat getFloat=nullptr;
         PFN_xrGetActionStatePose getPose=nullptr;
         PFN_xrLocateSpace locateSpace=nullptr;
+        PFN_xrGetCurrentInteractionProfile getCurrentProfile=nullptr;
+        PFN_xrPathToString pathToString=nullptr;
     } api;
     HMODULE loader = nullptr;
 
@@ -219,7 +223,11 @@ namespace
             return call();
         });
     }
-    HMODULE openvrBootstrap=nullptr; // Retained until process exit: DXVK may use it.
+    VRRuntimeVulkan::Creation* vulkanCreation=nullptr; // Explicit process lifetime for returned Vulkan callbacks.
+    XrGraphicsRequirementsVulkanKHR vulkanRequirements{XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR};
+    std::string runtimeName,runtimeVersion,lastFailure;
+    unsigned suggestedProfiles=0;
+    std::string controllerProfiles[2];
     bool pendingRecreate = false;
     bool permanentFailure = false;
     unsigned frameCount = 0;
@@ -286,8 +294,20 @@ namespace
         }
         char line[192];
         sprintf_s(line, "%s: %s (%d)", step, name, result);
+        if(XR_FAILED(result))lastFailure=line;
         Log(line);
         return XR_SUCCEEDED(result);
+    }
+
+    std::string JsonText(std::string_view value)
+    {
+        std::string result="\"";
+        for(const unsigned char c:value)
+        {
+            if(c=='"' || c=='\\')result+='\\';
+            if(c>=32)result+=char(c);
+        }
+        return result+'"';
     }
 
     const char* StateName(XrSessionState state)
@@ -324,7 +344,8 @@ namespace
         loader = LoadLibraryW(path);
         if (!loader)
         {
-            Log("OpenXR fallback: x86 plugins/openxr_loader.dll missing or unloadable");
+            lastFailure="x86 plugins/openxr_loader.dll missing or unloadable (Windows error "+std::to_string(GetLastError())+")";
+            Log(lastFailure.c_str());
             return false;
         }
 #define LOAD_XR(member, name) \
@@ -371,12 +392,14 @@ namespace
             LOAD_XR(getFloat,xrGetActionStateFloat)
             LOAD_XR(getPose,xrGetActionStatePose)
             LOAD_XR(locateSpace,xrLocateSpace)
+            LOAD_XR(getCurrentProfile,xrGetCurrentInteractionProfile)
+            LOAD_XR(pathToString,xrPathToString)
         }
 #undef LOAD_XR
         return true;
     }
 
-    void DestroyRuntime()
+    void DestroyRuntime(bool keepInstance=false)
     {
         producerRequest=2;producerActive=false;producerDeadline=0;
         displayRefreshHz=0;
@@ -425,6 +448,7 @@ namespace
         running = false;
         sessionState = XR_SESSION_STATE_UNKNOWN;
         inputReady=false;
+        controllerProfiles[0].clear();controllerProfiles[1].clear();
         for(auto& space:aimSpaces)
         {
             if(space!=XR_NULL_HANDLE) api.destroySpace(space);
@@ -460,6 +484,8 @@ namespace
         handPaths[0]=handPaths[1]=XR_NULL_PATH;
         if (context) { context->Release(); context = nullptr; }
         if (device) { device->Release(); device = nullptr; }
+        if(keepInstance)return; // Native DXVK device and its runtime requirements survive a D3D9 reset.
+        if(vulkanCreation)vulkanCreation->Disable();
         if (instance != XR_NULL_HANDLE)
         {
             Check("xrDestroyInstance", xrDestroyInstance(instance));
@@ -486,13 +512,11 @@ namespace
             !makeSet("phone","Phone",2,phoneActions)) return false;
         if(!Check("left hand path",api.stringToPath(instance,"/user/hand/left",&handPaths[0])) ||
             !Check("right hand path",api.stringToPath(instance,"/user/hand/right",&handPaths[1]))) return false;
-        std::vector<XrActionSuggestedBinding> bindings;
-        auto bind=[&](XrAction action,unsigned hand,const char* component){
-            if(!component) return true; // Rebindable actions without a default physical input.
-            const std::string path=std::string(hand ? "/user/hand/right":"/user/hand/left")+component;
-            XrPath xrPath=XR_NULL_PATH;
-            if(!Check("Vive binding path",api.stringToPath(instance,path.c_str(),&xrPath))) return false;
-            bindings.push_back({action,xrPath});return true;
+        struct DefaultBinding {XrAction action;unsigned hand;std::string name,component,group;};
+        std::vector<DefaultBinding> defaults;
+        auto bind=[&](XrAction action,unsigned hand,const char* name,const char* component,XrActionSet set){
+            const char* group=set==drivingActions ? "driving":set==phoneActions ? "phone":set==menuActions ? "menus":"on_foot";
+            defaults.push_back({action,hand,name,component ? component:"",group});return true;
         };
         auto create=[&](XrActionSet set,const char* name,const char* label,XrActionType type,XrAction& action,
             int hand,const char* component){
@@ -500,7 +524,7 @@ namespace
             strcpy_s(info.actionName,name);strcpy_s(info.localizedActionName,label);info.actionType=type;
             if(hand<0){info.countSubactionPaths=2;info.subactionPaths=handPaths;}
             if(!Check(name,api.createAction(set,&info,&action))) return false;
-            return hand<0 ? bind(action,0,component)&&bind(action,1,component):bind(action,hand,component);
+            return hand<0 ? bind(action,0,name,component,set)&&bind(action,1,name,component,set):bind(action,hand,name,component,set);
         };
         if(!create(inputActions,"thumb_direction","Thumb pose direction",XR_ACTION_TYPE_VECTOR2F_INPUT,padAction,-1,"/input/trackpad") ||
             !create(inputActions,"point_pose","Pointing pose",XR_ACTION_TYPE_POSE_INPUT,aimAction,-1,"/input/aim/pose") ||
@@ -566,10 +590,30 @@ namespace
             !game(Action::ScriptBack,menuActions,"interaction_back","Back / leave interaction",boolean,1,"/input/menu/click") ||
             !game(Action::Select,menuActions,"select","Select / drag",boolean,-1,"/input/trigger/click") ||
             !game(Action::Back,menuActions,"back","Back",boolean,1,"/input/menu/click")) return false;
-        XrInteractionProfileSuggestedBinding suggest{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-        if(!Check("Vive profile path",api.stringToPath(instance,"/interaction_profiles/htc/vive_controller",&suggest.interactionProfile))) return false;
-        suggest.countSuggestedBindings=static_cast<uint32_t>(bindings.size()); suggest.suggestedBindings=bindings.data();
-        if(!Check("Vive suggested bindings",api.suggestBindings(instance,&suggest))) return false;
+        suggestedProfiles=0;
+        for(const auto profile:{VRControllerBindings::Profile::Vive,VRControllerBindings::Profile::Touch,
+            VRControllerBindings::Profile::Index,VRControllerBindings::Profile::Motion})
+        {
+            std::vector<XrActionSuggestedBinding> bindings;
+            for(const auto& binding:defaults)
+            {
+                const auto component=VRControllerBindings::Component(profile,binding.name,binding.hand,binding.component,binding.group);
+                if(component.empty())continue;
+                const std::string path=std::string(binding.hand ? "/user/hand/right":"/user/hand/left")+std::string(component);
+                XrPath xrPath=XR_NULL_PATH;
+                if(!Check("controller binding path",api.stringToPath(instance,path.c_str(),&xrPath)))return false;
+                bindings.push_back({binding.action,xrPath});
+            }
+            XrInteractionProfileSuggestedBinding suggest{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+            if(!Check("controller profile path",api.stringToPath(instance,VRControllerBindings::Path(profile),&suggest.interactionProfile)))return false;
+            suggest.countSuggestedBindings=static_cast<uint32_t>(bindings.size());suggest.suggestedBindings=bindings.data();
+            const auto result=api.suggestBindings(instance,&suggest);
+            // Profiles are device descriptions, not runtime names. A runtime
+            // need not implement every controller family we suggest.
+            if(result==XR_ERROR_PATH_UNSUPPORTED)continue;
+            if(!Check("controller suggested bindings",result))return false;
+            ++suggestedProfiles;
+        }
         XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
         XrActionSet sets[]{inputActions,gameplayActions,drivingActions,menuActions,systemActions,phoneActions};
         attach.countActionSets=6; attach.actionSets=sets;
@@ -583,7 +627,7 @@ namespace
             if(!Check("xrCreateActionSpace(grip)",api.createActionSpace(session,&space,&gripSpaces[hand]))) return false;
         }
         inputReady=true;
-        Log("Semantic gameplay, driving, menu and hand actions attached with Vive defaults");
+        Log("OpenXR semantic actions attached with Vive, Touch, Index and motion-controller defaults");
         return true;
     }
 
@@ -794,8 +838,9 @@ namespace
         AcquireSRWLockExclusive(&eyeLock);panelPointer=pointer;ReleaseSRWLockExclusive(&eyeLock);
     }
 
-    bool CreateRuntime()
+    bool PrepareInstance()
     {
+        if(instance!=XR_NULL_HANDLE)return true;
         if (!LoadApi()) return false;
         uint32_t count = 0;
         if (!Check("xrEnumerateInstanceExtensionProperties(count)",
@@ -807,10 +852,11 @@ namespace
         bool hasD3D11 = false, hasRefreshRate=false;
         for (const auto& item : extensions)
         {
-            hasD3D11 |= std::strcmp(item.extensionName, vulkanEnabled ? XR_KHR_VULKAN_ENABLE_EXTENSION_NAME : XR_KHR_D3D11_ENABLE_EXTENSION_NAME) == 0;
+            hasD3D11 |= std::strcmp(item.extensionName, vulkanEnabled ? XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME : XR_KHR_D3D11_ENABLE_EXTENSION_NAME) == 0;
             hasRefreshRate |= std::strcmp(item.extensionName, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME) == 0;
         }
-        if (!hasD3D11) { Log("OpenXR fallback: required graphics binding unavailable"); return false; }
+        if (!hasD3D11)
+        {lastFailure=vulkanEnabled ? "Selected runtime lacks XR_KHR_vulkan_enable2":"Selected runtime lacks XR_KHR_D3D11_enable";Log(lastFailure.c_str());return false;}
 
         XrInstanceCreateInfo create{XR_TYPE_INSTANCE_CREATE_INFO};
         strcpy_s(create.applicationInfo.applicationName, "GTA IV VR");
@@ -818,7 +864,7 @@ namespace
         strcpy_s(create.applicationInfo.engineName, "FusionFix");
         create.applicationInfo.engineVersion = 1;
         create.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
-        const char* names[] = {vulkanEnabled ? XR_KHR_VULKAN_ENABLE_EXTENSION_NAME : XR_KHR_D3D11_ENABLE_EXTENSION_NAME,XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME};
+        const char* names[] = {vulkanEnabled ? XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME : XR_KHR_D3D11_ENABLE_EXTENSION_NAME,XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME};
         create.enabledExtensionCount = hasRefreshRate ? 2 : 1;
         create.enabledExtensionNames = names;
         if (!Check("xrCreateInstance", xrCreateInstance(&create, &instance))) return false;
@@ -828,6 +874,9 @@ namespace
         XrInstanceProperties props{XR_TYPE_INSTANCE_PROPERTIES};
         if (Check("xrGetInstanceProperties", xrGetInstanceProperties(instance, &props)))
         {
+            runtimeName=props.runtimeName;
+            runtimeVersion=std::to_string(XR_VERSION_MAJOR(props.runtimeVersion))+"."+
+                std::to_string(XR_VERSION_MINOR(props.runtimeVersion))+"."+std::to_string(XR_VERSION_PATCH(props.runtimeVersion));
             char line[256];
             sprintf_s(line, "OpenXR runtime: %s %u.%u.%u", props.runtimeName,
                 XR_VERSION_MAJOR(props.runtimeVersion), XR_VERSION_MINOR(props.runtimeVersion),
@@ -838,6 +887,18 @@ namespace
         XrSystemGetInfo systemInfo{XR_TYPE_SYSTEM_GET_INFO};
         systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
         if (!Check("xrGetSystem(HMD)", xrGetSystem(instance, &systemInfo, &systemId))) return false;
+        if(vulkanEnabled)
+        {
+            PFN_xrGetVulkanGraphicsRequirements2KHR get=nullptr;
+            if(XR_FAILED(xrGetInstanceProcAddr(instance,"xrGetVulkanGraphicsRequirements2KHR",reinterpret_cast<PFN_xrVoidFunction*>(&get))) || !get ||
+                !Check("xrGetVulkanGraphicsRequirements2KHR",get(instance,systemId,&vulkanRequirements)))return false;
+        }
+        return true;
+    }
+
+    bool CreateRuntime()
+    {
+        if(!PrepareInstance())return false;
         if(runtimeEyeResolution)
         {
             uint32_t count=0;
@@ -879,16 +940,15 @@ namespace
             vulkanBridge=new DxvkVulkan::Bridge;
             if(!vulkanBridge->Attach(*RageDirect3DDevice9::m_pRealDevice))
                 {Log("OpenXR Vulkan: DXVK device interop unavailable"); return false;}
-            PFN_xrGetVulkanGraphicsRequirementsKHR getRequirements=nullptr;
-            PFN_xrGetVulkanGraphicsDeviceKHR getPhysical=nullptr;
-            if(XR_FAILED(xrGetInstanceProcAddr(instance,"xrGetVulkanGraphicsRequirementsKHR",reinterpret_cast<PFN_xrVoidFunction*>(&getRequirements))) ||
-                XR_FAILED(xrGetInstanceProcAddr(instance,"xrGetVulkanGraphicsDeviceKHR",reinterpret_cast<PFN_xrVoidFunction*>(&getPhysical))) ||
-                !getRequirements || !getPhysical) return false;
-            XrGraphicsRequirementsVulkanKHR requirements{XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR};
-            VkPhysicalDevice selected=nullptr;
-            if(!Check("xrGetVulkanGraphicsRequirementsKHR",getRequirements(instance,systemId,&requirements)) ||
-                !Check("xrGetVulkanGraphicsDeviceKHR",getPhysical(instance,systemId,vulkanBridge->instance,&selected)) ||
-                selected!=vulkanBridge->physical) return false;
+            if(!vulkanCreation || !vulkanCreation->Matches(vulkanBridge->instance,vulkanBridge->physical,vulkanBridge->device))
+            {
+                lastFailure=vulkanCreation && *vulkanCreation->problem ? vulkanCreation->problem:
+                    "DXVK graphics objects were not created through the selected OpenXR runtime";
+                if(vulkanCreation)lastFailure+=" (OpenXR "+std::to_string(vulkanCreation->result)+
+                    ", Vulkan "+std::to_string(vulkanCreation->graphicsResult)+")";
+                Log(lastFailure.c_str());return false;
+            }
+            const auto selected=vulkanBridge->physical;
             XrGraphicsBindingVulkanKHR binding{XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR};
             binding.instance=vulkanBridge->instance; binding.physicalDevice=selected; binding.device=vulkanBridge->device;
             binding.queueFamilyIndex=vulkanBridge->family; binding.queueIndex=vulkanBridge->index;
@@ -964,6 +1024,7 @@ namespace
             Log("STAGE unavailable: LOCAL fallback has no calibrated floor height");
         }
         if(!CreateControllerActions()) Log("Controller actions unavailable; headset rendering retained without controller input");
+        else lastFailure.clear();
         frameCount = 0;
         Log("OpenXR session created; game rendering remains flat-screen");
         return true;
@@ -971,6 +1032,7 @@ namespace
 
     void Fallback(const char* reason)
     {
+        if(lastFailure.empty())lastFailure=reason;
         Log(reason);
         DestroyRuntime();
         permanentFailure = true;
@@ -1024,9 +1086,27 @@ namespace
         XrResult result;
         while ((result = xrPollEvent(instance, &event)) == XR_SUCCESS)
         {
+            if(event.type==XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED && inputReady &&
+                reinterpret_cast<const XrEventDataInteractionProfileChanged*>(&event)->session==session)
+            {
+                for(unsigned hand=0;hand<2;++hand)
+                {
+                    XrInteractionProfileState profile{XR_TYPE_INTERACTION_PROFILE_STATE};
+                    controllerProfiles[hand].clear();
+                    if(api.getCurrentProfile(session,handPaths[hand],&profile)==XR_SUCCESS && profile.interactionProfile!=XR_NULL_PATH)
+                    {
+                        char path[XR_MAX_PATH_LENGTH]{};uint32_t count=0;
+                        if(api.pathToString(instance,profile.interactionProfile,sizeof(path),&count,path)==XR_SUCCESS)
+                            controllerProfiles[hand]=path;
+                    }
+                }
+            }
             if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED)
             {
                 const auto& state = *reinterpret_cast<const XrEventDataSessionStateChanged*>(&event);
+                // A retained instance can still have events from a session
+                // retired during D3D9 reset. Never apply them to its replacement.
+                if(state.session!=session) {event={XR_TYPE_EVENT_DATA_BUFFER};continue;}
                 sessionState = state.state;
                 char line[96];
                 sprintf_s(line, "OpenXR session state: %s (%d)", StateName(sessionState),
@@ -1355,7 +1435,10 @@ std::string OpenXRVR::Status()
     const auto size=recommendedEyeSize.load();
     result+=",\"configuredEyeWidth\":"+std::to_string(unsigned(size>>32))+",\"configuredEyeHeight\":"+
         std::to_string(unsigned(size))+",\"submittedEyeWidth\":"+std::to_string(imageWidth)+
-        ",\"submittedEyeHeight\":"+std::to_string(imageHeight)+",\"eyeRenderScale\":"+std::to_string(eyeRenderScale)+"}";
+        ",\"submittedEyeHeight\":"+std::to_string(imageHeight)+",\"eyeRenderScale\":"+std::to_string(eyeRenderScale)+",\"runtime\":"+JsonText(runtimeName)+
+        ",\"runtimeVersion\":"+JsonText(runtimeVersion)+",\"processBits\":32,\"controllersReady\":"+(inputReady ? "true":"false")+
+        ",\"suggestedProfiles\":"+std::to_string(suggestedProfiles)+",\"controllerProfiles\":["+
+        JsonText(controllerProfiles[0])+","+JsonText(controllerProfiles[1])+"],\"lastError\":"+JsonText(lastFailure)+"}";
     return result;
 }
 
@@ -1732,47 +1815,10 @@ void OpenXRVR::Install()
             SetEnvironmentVariableA("DXVK_DEBUG",diagnostic.c_str());
             Log("DXVK diagnostics enabled for this process; do not use for performance comparisons");
         }
-        auto bootstrap=std::filesystem::path(ini.ReadString("VR","VulkanOpenVRBootstrap",""));
-        if(bootstrap.empty())
-        {
-            // SteamVR's manifest lives beneath its installation. Respect the
-            // loader's environment override before inspecting registered runtimes.
-            wchar_t manifest[32768]{};
-            const auto length=GetEnvironmentVariableW(L"XR_RUNTIME_JSON",manifest,_countof(manifest));
-            auto findBootstrap=[](const wchar_t* runtime)->std::filesystem::path
-            {
-                auto directory=std::filesystem::path(runtime).parent_path();
-                if(!directory.is_absolute()) return {};
-                while(!directory.empty())
-                {
-                    auto candidate=directory/L"bin"/L"win32"/L"openvr_api.dll";
-                    const auto attributes=GetFileAttributesW(candidate.c_str());
-                    if(attributes!=INVALID_FILE_ATTRIBUTES && !(attributes&FILE_ATTRIBUTE_DIRECTORY)) return candidate;
-                    const auto parent=directory.parent_path();
-                    if(parent==directory) break;
-                    directory=parent;
-                }
-                return {};
-            };
-            if(length && length<_countof(manifest)) bootstrap=findBootstrap(manifest);
-            if(!length)
-            {
-                for(const auto view:{RRF_SUBKEY_WOW6432KEY,RRF_SUBKEY_WOW6464KEY})
-                {
-                    DWORD bytes=sizeof(manifest);
-                    if(RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\Khronos\\OpenXR\\1",L"ActiveRuntime",
-                        RRF_RT_REG_SZ|view,nullptr,manifest,&bytes)==ERROR_SUCCESS)
-                        bootstrap=findBootstrap(manifest);
-                    if(!bootstrap.empty()) break;
-                }
-            }
-        }
-        if(!bootstrap.empty())
-        {
-            if(!bootstrap.is_absolute()) {Fallback("Vulkan bootstrap DLL path must be absolute"); return;}
-            openvrBootstrap=LoadLibraryExW(bootstrap.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-            if(!openvrBootstrap) {Fallback("Vulkan OpenVR bootstrap preload failed"); return;}
-        }
+        if(!PrepareInstance()) {Fallback("OpenXR runtime discovery failed before DXVK creation");return;}
+        vulkanCreation=new VRRuntimeVulkan::Creation;
+        if(!vulkanCreation->Install(instance,systemId,api.getInstanceProcAddr))
+        {Fallback("OpenXR Vulkan creation integration unavailable");return;}
         pendingRecreate=true; // Bind the actual game device on first EndScene.
         Log("Experimental Vulkan bridge selected; waiting for game DXVK device");
     }
@@ -1782,7 +1828,7 @@ void OpenXRVR::Install()
     {
         if (!enabled || permanentFailure || pendingRecreate) return;
         Log("D3D9 reset: recreating OpenXR session on next EndScene");
-        DestroyRuntime();
+        DestroyRuntime(vulkanEnabled);
         pendingRecreate = true;
     };
     FusionFix::onShutdownEvent() += []()

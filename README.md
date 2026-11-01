@@ -68,17 +68,18 @@ There are also known stereo issues with [traffic-light lamps](https://github.com
 | --- | --- |
 | Tested Vive + Wands + SteamVR setup | The reference configuration for the features described above; known limitations still apply. |
 | Other headsets through SteamVR | Headset rendering and tracking are plausible because the mod uses OpenXR. This is an engineering expectation, **not tested compatibility**. |
-| Index, Touch or other controllers | Untested. The code currently supplies default bindings only for the Vive controller profile. Expect custom SteamVR bindings and possibly code changes or hand/weapon pose calibration; plug-and-play support is not promised. |
-| Other OpenXR runtimes, standalone headsets without PC streaming, or Linux/Proton | Untested. The current Vulkan bootstrap is SteamVR-specific; OpenXR support alone does not establish compatibility. |
+| Index, Touch or Microsoft motion controllers | OpenXR default bindings are supplied. Physical controller testing and hand/weapon pose calibration remain unverified; plug-and-play compatibility is not promised. |
+| Other OpenXR runtimes, including VDXR | Initialization uses the selected runtime and its Vulkan requirements. VDXR/Quest testing is pending; OpenXR support alone does not establish compatibility. |
+| Standalone headsets without PC streaming, or Linux/Proton | Unsupported standalone execution; Linux/Proton is untested. This mod runs inside the Windows PC game. |
 
 There is not enough testing to give a meaningful percentage chance that another configuration will work. Other SteamVR headsets are a more plausible first experiment than changing both the runtime and controllers. Headset compatibility and usable controller bindings are separate questions. See the [OpenXR interaction-profile specification](https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html#semantic-paths-interaction-profiles) for the underlying input model.
 
 ## Installation
 
-1. Install the official Windows **GTA IV: The Complete Edition** and [SteamVR](https://store.steampowered.com/app/250820/SteamVR/). In SteamVR settings, make SteamVR the active OpenXR runtime.
+1. Install the official Windows **GTA IV: The Complete Edition** and configure a **32-bit-capable OpenXR runtime** for your PC headset connection. [SteamVR](https://store.steampowered.com/app/250820/SteamVR/) is the tested reference. Alternate runtimes remain unverified; see [runtime compatibility](docs/openxr-runtime-compatibility.md).
 2. Download **GTA4VR.zip** from [Releases](https://github.com/bordplate/GTA4VR/releases/latest).
 3. Extract its contents directly into the game folder containing **GTAIV.exe**. For Steam, this is normally `steamapps/common/Grand Theft Auto IV/GTAIV`. Allow the mod files to merge/replace after backing up any existing mod installation.
-4. Start SteamVR, turn on your headset/controllers, then launch the game normally.
+4. Connect your headset/controllers through your chosen PC VR software, then launch the game normally. The OpenXR loader selects the configured runtime.
 
 **You do not need a separate FusionFix.** The package includes the FusionFix base, ASI loader, DXVK, OpenXR loader, and VR configuration.
 
@@ -90,7 +91,7 @@ Settings are in `plugins/GTAIV.EFLC.FusionFix.ini`, with weapon profiles in `plu
 
 To play a blocked section on a flat screen, quit, set **`[VR] DisableOpenXR=1`** in the INI and relaunch. After completing the section, quit, set **`DisableOpenXR=0`** and relaunch. The old `EnableOpenXR` option is no longer used. Keep a keyboard/gamepad available. Missing or unsupported runtime/headset initialization should fall back to flat-screen play.
 
-Development diagnostics remain off by default. Advanced graphics options and the optional SteamVR path override are covered in [graphics bridge notes](docs/vulkan-openxr-feasibility.md) and [diagnostic settings](docs/vr-diagnostics.md).
+Development diagnostics remain off by default. Runtime selection, graphics requirements and failure reports are covered in [runtime compatibility](docs/openxr-runtime-compatibility.md) and [diagnostic settings](docs/vr-diagnostics.md).
 
 ## Vive Wand controls
 

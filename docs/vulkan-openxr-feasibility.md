@@ -1,5 +1,14 @@
 # Vulkan/OpenXR feasibility — issue 013
 
+## Runtime portability update (2026-11-01)
+
+The current implementation replaces the historical OpenVR bootstrap below with
+OpenXR `XR_KHR_vulkan_enable2` creation through the selected runtime. No SteamVR
+installation search, OpenVR preload or `VulkanOpenVRBootstrap` override is used.
+See [runtime compatibility](openxr-runtime-compatibility.md) for architecture,
+controller profiles, validation and alternate-runtime limits. The discovery and
+profiling sections below describe the earlier prototype and its measured results.
+
 ## Recommendation (2026-10-04)
 
 Continue evaluating the opt-in DXVK/Vulkan eye-image bridge. Continuous headset stereo, explicit shutdown/relaunch and an initial saved-view performance improvement are verified locally. Retain the system D3D9Ex/D3D11 default until broader correctness, lifecycle and street/vehicle Release comparisons pass.
