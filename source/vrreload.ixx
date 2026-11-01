@@ -735,7 +735,7 @@ namespace
                 !*reinterpret_cast<void**>(static_cast<char*>(rocket)+0x25C)) nativeRocketVisual=rocket;
         }
         OpenXRVR::ControllerInput input{};
-        if(!OpenXRVR::HasFocusedViews() || !OpenXRVR::GetControllerInput(input) || input.phoneActive ||
+        if(!OpenXRVR::HasFocusedViews() || !OpenXRVR::GetControllerInput(input) || input.phoneActive || input.handCalibration ||
             Natives::IsPauseMenuActive() || !input.gripPoseValid[0] || !input.gripPoseValid[1])
         {counterEditing=false;rightGrip=leftGrip=true;racking=false;slideDistance=0;leftBusy=false;guide={};return;}
         if(fireAnimationTest.exchange(false) && !racking) PlayFireAnimation();

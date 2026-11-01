@@ -11,6 +11,7 @@ module;
 #include <openxr/openxr_platform.h>
 #include "includes/vrruntimevulkan.hpp"
 #include "includes/vrcontrollerbindings.hpp"
+#include "includes/vrhandcalibration.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -32,6 +33,7 @@ import vrdiagnostics;
 import vrprofile;
 import comvars;
 import settings;
+import vrconfig;
 
 export namespace OpenXRVR
 {
@@ -47,6 +49,9 @@ export namespace OpenXRVR
         bool active[2]{},clicked[2]{},poseValid[2]{};
         float trackpad[2][2]{},position[2][3]{},orientation[2][4]{};
         bool gripPoseValid[2]{},gripActive[2]{},gripped[2]{};
+        char controllerProfile[2][256]{};
+        bool handCalibration=false,calibrationGrip[2]{};
+        bool touchController[2]{}; // Active interaction profile, independent of runtime vendor.
         float gripPosition[2][3]{},gripOrientation[2][4]{};
         bool triggerActive[2]{},padTouched[2]{};
         bool menuActive[2]{},menuPressed[2]{};
@@ -634,6 +639,11 @@ namespace
     void SampleControllerInput(XrTime time)
     {
         OpenXRVR::ControllerInput sample{};
+        for(unsigned hand=0;hand<2;++hand)
+        {
+            sample.touchController[hand]=VRHandCalibration::IsTouch(controllerProfiles[hand]);
+            strncpy_s(sample.controllerProfile[hand],controllerProfiles[hand].c_str(),_TRUNCATE);
+        }
         if(inputReady && sessionState==XR_SESSION_STATE_FOCUSED)
         {
             const bool menu=CMenuManager::m_MenuActive && *CMenuManager::m_MenuActive;
@@ -792,6 +802,27 @@ namespace
                     }
                 }
         }
+        }
+        // Calibration owns grip and suppresses gameplay actions, leaving pause available.
+        // Preserve poses/profile data but do not let grip reload, grab or steer.
+        if(VRConfig::Read().Get(VRConfig::Flag::HandCalibration) &&
+            !(CMenuManager::m_MenuActive && *CMenuManager::m_MenuActive) &&
+            !sample.phoneActive && !sample.scriptMenuActive && !drivingInput.load())
+        {
+            const auto observed=sample;
+            sample={}; sample.handCalibration=true; sample.pause=observed.pause;
+            for(unsigned hand=0;hand<2;++hand)
+            {
+                sample.touchController[hand]=observed.touchController[hand];
+                strcpy_s(sample.controllerProfile[hand],observed.controllerProfile[hand]);
+                sample.gripPoseValid[hand]=observed.gripPoseValid[hand];
+                std::copy_n(observed.gripPosition[hand],3,sample.gripPosition[hand]);
+                std::copy_n(observed.gripOrientation[hand],4,sample.gripOrientation[hand]);
+                sample.poseValid[hand]=observed.poseValid[hand];
+                std::copy_n(observed.position[hand],3,sample.position[hand]);
+                std::copy_n(observed.orientation[hand],4,sample.orientation[hand]);
+                sample.calibrationGrip[hand]=observed.gripActive[hand] && observed.gripped[hand];
+            }
         }
         sample.sampledAt=GetTickCount64();
         phoneEdges.Sample(VRPhoneInput::Buttons(sample));

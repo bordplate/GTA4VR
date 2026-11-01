@@ -8,6 +8,7 @@ import settings;
 import vrconfig;
 import openxrvr;
 import vrcamera;
+import vrhands;
 export namespace VRSettings
 {
     void Install();
@@ -86,6 +87,7 @@ namespace
             {
             case Flag::DisableOpenXR:return std::wstring(L"Enables VR on the next game launch. Switch off to launch flat screen. Changing this option does not end the current session.");
             case Flag::PhysicalCrouch:return std::wstring(L"Your tracked head height controls native crouching. Entry is 65% and standing is 75% of configured standing eye height.");
+            case Flag::HandCalibration:return (VRHands::ControllerCalibrationResult()<0 ? std::wstring(L"Could not save placement. Check INI write access and try again. ") : VRHands::ControllerCalibrationResult()==1 ? std::wstring(L"Left-hand placement saved. ") : VRHands::ControllerCalibrationResult()==2 ? std::wstring(L"Right-hand placement saved. ") : std::wstring{})+std::wstring(L"Resume on foot, unarmed. Hold grip to freeze a hand, then move/rotate its controller to fit. Release to save per controller. Repeat for the other hand and turn this off. Gameplay controls pause during calibration.");
             case Flag::AmmoCounters:return std::wstring(L"Shows the round pins and reserve ammunition display attached to supported weapons. Individual weapon profiles retain their display settings when switched off.");
             case Flag::VehiclePanelEditing:return std::wstring(L"Grip the radar or radio to move and rotate it. Release to save placement for this vehicle model. With editing off, grip and drag the radio's station strip to tune the station in the centre.");
             default:return std::wstring(L"Displays the tracked first-person character body in VR.");
@@ -130,6 +132,7 @@ namespace
         });
         ready&=Toggle(root,Flag::PhysicalCrouch,L"Physical crouch");
         ready&=Toggle(root,Flag::ShowBody,L"Show first-person body");
+        ready&=Toggle(root,Flag::HandCalibration,L"Calibrate controller placement");
         ready&=Numeric(root,Number::BodyForward);
         ready&=FusionFixSettings.AddSpacer(root);
         for(auto id:{Number::HudWidth,Number::HudDistance,Number::WristSize,Number::WristBack,Number::WristLift})ready&=Numeric(root,id);

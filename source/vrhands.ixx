@@ -2,6 +2,7 @@ module;
 #include <common.hxx>
 #include "includes/vrmath.hpp"
 #include "includes/vrgrip.hpp"
+#include "includes/vrhandcalibration.hpp"
 #include "includes/vrmelee.hpp"
 #include "includes/vrrecoil.hpp"
 #include "includes/vrwheel.hpp"
@@ -27,6 +28,7 @@ export namespace VRHands
     bool WheelSteering(float& steering);
     bool DrivingWeaponActive();
     bool ExecutionInteractionActive();
+    int ControllerCalibrationResult();
     bool HideDrivingWeapon(void* entity);
     void PrepareObjectRender(void* entity);
     void ConsumeRoomMotion(void* owner,const VRMath::Vector& consumed);
@@ -477,6 +479,35 @@ namespace
     uint64_t targetAt=0;
     VRMath::Matrix wristCorrection[2]={VRMath::Identity(),VRMath::Identity()};
     bool calibrated[2]{};
+    bool explicitCorrection[2]{},sessionCorrection[2]{};
+    std::atomic<int> controllerCalibrationResult{0};
+    struct ControllerCalibration {
+        std::string profile;
+        VRMath::Matrix correction=VRMath::Identity();
+        bool saved=false;
+        uint64_t at=0;
+        VRHandCalibration::Freeze freeze;
+    } controllerCalibration[2];
+    bool ReadControllerCalibration(const std::string& section,unsigned hand,VRMath::Matrix& value)
+    {
+        CIniReader ini("");
+        const auto text=ini.ReadString(section,hand==0 ? "Left":"Right","");
+        float p[3]{},q[4]{};char trailing=0;
+        if(sscanf_s(text.c_str(),"%f %f %f %f %f %f %f %c",&p[0],&p[1],&p[2],
+            &q[0],&q[1],&q[2],&q[3],&trailing,1u)!=7)return false;
+        for(float v:p)if(!std::isfinite(v))return false;
+        for(float v:q)if(!std::isfinite(v))return false;
+        try {value=VRMath::Pose(p,q);return true;}catch(const std::invalid_argument&) {return false;}
+    }
+    bool SaveControllerCalibration(const std::string& section,unsigned hand,const VRMath::Matrix& value)
+    {
+        for(const auto& row:value)for(float v:row)if(!std::isfinite(v))return false;
+        const auto q=VRMath::Quaternion(value);
+        const auto text=std::format("{:.9g} {:.9g} {:.9g} {:.9g} {:.9g} {:.9g} {:.9g}",
+            value[3][0],value[3][1],value[3][2],q[0],q[1],q[2],q[3]);
+        CIniReader ini("");ini.WriteString(section,hand==0 ? "Left":"Right",text,true);
+        return CIniReader("").ReadString(section,hand==0 ? "Left":"Right","")==text;
+    }
     int correctionDegrees[3]{};
     std::atomic<unsigned> updates{0},solves[2]{};
     bool fingersEnabled=false;
@@ -1820,12 +1851,15 @@ namespace
         updateHook.thiscall<void>(manager);
         if(!enabled || !solveArm || !OpenXRVR::HasFocusedViews()) {supportGripping=false; return;}
         VRMath::Matrix transform{},correction[2]{},vehicleFrame{};
+        bool customCorrection[2]{},sessionOverride[2]{};
         void* owner=nullptr; void* vehicle=nullptr; uint64_t at=0;bool bike=false,helicopter=false,rail=false;
         AcquireSRWLockShared(&targetLock);
         transform=trackingToWorld; owner=targetOwner; at=targetAt;
         vehicle=trackingVehicle; vehicleFrame=trackingVehicleFrame;bike=trackingBike;
         helicopter=trackingHelicopter;rail=trackingRail;
         correction[0]=wristCorrection[0]; correction[1]=wristCorrection[1];
+        customCorrection[0]=explicitCorrection[0]; customCorrection[1]=explicitCorrection[1];
+        sessionOverride[0]=sessionCorrection[0]; sessionOverride[1]=sessionCorrection[1];
         ReleaseSRWLockShared(&targetLock);
         if(!owner || !at || GetTickCount64()-at>100 ||
             static_cast<char*>(manager)!=static_cast<char*>(owner)+0xBB0 ||
@@ -1908,7 +1942,7 @@ namespace
         VRMath::Matrix targets[2]{};
         for(unsigned hand=0;hand<2;++hand)
         {
-            if(!input.gripPoseValid[hand]) continue;
+            if(!input.gripPoseValid[hand]) {controllerCalibration[hand].freeze.Cancel();continue;}
             const auto grip=VRMath::Multiply(
                 VRMath::Pose(input.gripPosition[hand],input.gripOrientation[hand]),transform);
             // Provisional attachment basis X=right,Y=forward,Z=up; the live
@@ -1922,7 +1956,36 @@ namespace
                 target[1][axis]=-grip[2][axis];
                 target[2][axis]=grip[1][axis];
             }
-            target=VRMath::Multiply(correction[hand],target);
+            auto& calibration=controllerCalibration[hand];
+            const std::string profile=input.controllerProfile[hand];
+            const std::string section="VRHands "+profile;
+            if(calibration.profile!=profile)
+            {
+                calibration={};calibration.profile=profile;
+                if(!profile.empty())
+                    try {calibration.saved=ReadControllerCalibration(section,hand,calibration.correction);}
+                    catch(...) {calibration.saved=false;}
+            }
+            if(!calibration.at || input.sampledAt-calibration.at>100)calibration.freeze.Cancel();
+            calibration.at=input.sampledAt;
+            const auto wrist=sessionOverride[hand] ? correction[hand]:
+                calibration.saved ? calibration.correction:
+                customCorrection[hand] ? correction[hand]:VRHandCalibration::Default(input.touchController[hand],hand);
+            const auto basis=target;
+            target=VRMath::Multiply(wrist,basis);
+            if(const auto next=calibration.freeze.Update(input.handCalibration && !profile.empty(),
+                input.gripPoseValid[hand],input.calibrationGrip[hand],basis,target))
+            {
+                try {
+                    if(SaveControllerCalibration(section,hand,*next))
+                    {
+                        calibration.correction=*next;calibration.saved=true;controllerCalibrationResult=hand+1;
+                        AcquireSRWLockExclusive(&targetLock);sessionCorrection[hand]=false;
+                        ReleaseSRWLockExclusive(&targetLock);
+                    }
+                    else controllerCalibrationResult=-1;
+                } catch(...) {controllerCalibrationResult=-1;}
+            }
             targets[hand]=target;
         }
         bool panelBusy[2]{input.phoneActive || leftWeapon,input.phoneActive};
@@ -2093,7 +2156,7 @@ namespace
         else kick=recoil.Sample(GetTickCount64(),recoilSettings[2]);
         recoilDegrees=kick;
         ReleaseSRWLockExclusive(&recoilLock);
-        if(!vehicle && kick>.001f && input.gripPoseValid[1])
+        if(!input.handCalibration && !vehicle && kick>.001f && input.gripPoseValid[1])
         {
             const auto weaponModelIndex=*reinterpret_cast<short*>(static_cast<char*>(held)+0x2E);
             if(weaponModelIndex>=0 && models[weaponModelIndex] && ResolveSupportGrip(models[weaponModelIndex],recoilType))
@@ -2109,12 +2172,12 @@ namespace
             // Keep the tracked pose before collision feedback/IK. Physics must
             // chase the Wand, never its own collision-resolved wrist rotation.
             physicsRig.requested[hand]=targets[hand];
-            if(input.gripPoseValid[hand]) VRHandPhysics::Resolve(owner,hand,targets[hand]);
+            if(input.gripPoseValid[hand] && !input.handCalibration) VRHandPhysics::Resolve(owner,hand,targets[hand]);
         }
         VRMath::Matrix solvedRight{};
         bool rightSolved=false;
         VRMath::Matrix slideRelative{};
-        const bool sliding=!vehicle && VRReloadRuntime::SlideGrip(owner,held,slideRelative);
+        const bool sliding=!input.handCalibration && !vehicle && VRReloadRuntime::SlideGrip(owner,held,slideRelative);
         physicsRig.supporting[0]=supporting || sliding;
         for(unsigned order=0;order<2;++order)
         {
@@ -2562,6 +2625,8 @@ bool VRHands::SetRotation(int x,int y,int z)
     const int degrees[3]={x,y,z};
     AcquireSRWLockExclusive(&targetLock);
     wristCorrection[0]=wristCorrection[1]=rotation;
+    explicitCorrection[0]=explicitCorrection[1]=true;
+    sessionCorrection[0]=sessionCorrection[1]=true;
     calibrated[0]=calibrated[1]=false;
     std::memcpy(correctionDegrees,degrees,sizeof(degrees));
     ReleaseSRWLockExclusive(&targetLock);
@@ -2572,8 +2637,13 @@ bool VRHands::Trim(unsigned hand,int x,int y,int z)
 {
     if(!enabled || hand>1 || x < -45 || x > 45 || y < -45 || y > 45 || z < -45 || z > 45) return false;
     const auto trim=Rotation(x,y,z);
+    OpenXRVR::ControllerInput input{};
+    OpenXRVR::GetControllerInput(input);
     AcquireSRWLockExclusive(&targetLock);
-    wristCorrection[hand]=VRMath::Multiply(trim,wristCorrection[hand]);
+    const auto previous=explicitCorrection[hand] ? wristCorrection[hand]:
+        VRHandCalibration::Default(input.touchController[hand],hand);
+    wristCorrection[hand]=VRMath::Multiply(trim,previous);
+    explicitCorrection[hand]=true;sessionCorrection[hand]=true;
     ReleaseSRWLockExclusive(&targetLock);
     return true;
 }
@@ -2604,7 +2674,7 @@ bool VRHands::Calibrate(unsigned hand)
     }
     const auto correction=VRMath::Multiply(desired,VRMath::InverseRigid(basis));
     AcquireSRWLockExclusive(&targetLock);
-    wristCorrection[hand]=correction; calibrated[hand]=true;
+    wristCorrection[hand]=correction; calibrated[hand]=true; explicitCorrection[hand]=true;sessionCorrection[hand]=true;
     ReleaseSRWLockExclusive(&targetLock);
     return true;
 }
@@ -2761,6 +2831,7 @@ void VRHands::Install()
         {
             const float origin[3]={};
             wristCorrection[hand]=VRMath::Pose(origin,quaternion);
+            explicitCorrection[hand]=true;
             calibrated[hand]=true;
         }
         catch(const std::invalid_argument&) { /* Invalid optional calibration retains default basis. */ }
@@ -2787,3 +2858,5 @@ std::string VRHands::PistolStatus()
         ",\"appliedDamage\":"+std::to_string(bulletApplied.load())+",\"healthBefore\":"+std::to_string(bulletHealthBefore.load())+
         ",\"healthAfter\":"+std::to_string(bulletHealthAfter.load())+"}";
 }
+
+int VRHands::ControllerCalibrationResult() {return controllerCalibrationResult.load();}

@@ -32,7 +32,7 @@ void VRConfig::Initialize()
         configured.values[i]=VRSettingsModel::Valid(Number(i),value) ? value:spec.fallback;
     }
     for(unsigned i=0;i<configured.enabled.size();++i)
-        configured.enabled[i]=ini.ReadInteger("VR",VRSettingsModel::flags[i],configured.enabled[i])!=0;
+        configured.enabled[i]=i==unsigned(Flag::HandCalibration) ? false:ini.ReadInteger("VR",VRSettingsModel::flags[i],configured.enabled[i])!=0;
     revision.fetch_add(1,std::memory_order_release);
     ReleaseSRWLockExclusive(&configLock);
 }
@@ -63,8 +63,9 @@ bool VRConfig::Set(Flag id,bool value)
     try
     {
         const auto key=VRSettingsModel::flags[unsigned(id)];
-        CIniReader ini("");ini.WriteInteger("VR",key,value ? 1:0,true);
-        if(CIniReader("").ReadInteger("VR",key,-1)!=(value ? 1:0))
+        CIniReader ini("");
+        if(id!=Flag::HandCalibration)ini.WriteInteger("VR",key,value ? 1:0,true);
+        if(id!=Flag::HandCalibration && CIniReader("").ReadInteger("VR",key,-1)!=(value ? 1:0))
         {ReleaseSRWLockExclusive(&configLock);return false;}
         configured.enabled[unsigned(id)]=value;revision.fetch_add(1,std::memory_order_release);
     }

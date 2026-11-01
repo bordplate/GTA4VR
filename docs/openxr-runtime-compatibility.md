@@ -65,6 +65,34 @@ out. Driving context interaction uses left Y. Context-dependent action-set
 priorities retain menu/phone ownership. SteamVR users retain their existing
 custom action bindings; other runtimes need not provide a binding editor.
 
+Touch/Quest grip-to-rig rotation defaults use the Quest 3 calibration supplied
+by a hardware tester: left quaternion `(0.5, 0.5, -0.5, 0.5)`, right
+`(-0.5, 0.5, 0.5, 0.5)` in x/y/z/w order. These are selected per hand from
+the active Touch, Touch Plus or Touch Pro interaction profile, including after
+controller changes. Vive and unknown profiles retain the identity correction.
+Explicit `HandGripRotationLeft` / `HandGripRotationRight` INI values override
+the automatic defaults. No positional offset is added by the Quest defaults.
+
+### Calibrating controller placement in the headset
+
+Enable **VR > Calibrate controller placement**, then resume on foot with empty
+hands. Release both grips first. Hold either grip to freeze that hand in space;
+move and rotate the physical controller to match the frozen hand, then release
+grip to apply and save. Repeat for the other hand, then turn calibration mode off.
+The menu description reports the last save or a write error. Mode itself is
+session-only and starts off on every launch.
+
+Gameplay controls are suspended during on-foot calibration; pause remains
+available. Vehicle, phone and menu interactions retain their normal controls.
+Tracking loss, a controller-profile change, opening the menu, or disabling mode
+cancels an unfinished hold rather than saving it. Position and rotation are
+stored together per hand under `[VRHands <OpenXR interaction-profile path>]` in
+the ASI INI. Saved profile calibration overrides the supplied default and the
+legacy global quaternion setting; an explicit bridge calibration overrides both
+for the current session. Removing the corresponding `Left` or `Right` entry
+restores the configured/default placement. Profiles are selected automatically
+when controllers change; no runtime-specific detection is involved.
+
 ## Reporting failures
 
 `tools/game-command.ps1 status` includes runtime identity, process bitness,
