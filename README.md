@@ -87,7 +87,7 @@ Optional web/offline installers are also provided in releases.
 
 ### Configuration and flat-screen play
 
-Settings are in `plugins/GTAIV.EFLC.FusionFix.ini`, with weapon profiles in `plugins/VRWeapons/`. Configure `[VR] PlayerHeight` for your height in metres; in-game calibration is planned. Controller actions can be rebound through SteamVR.
+VR settings are in `plugins/GTAIV.EFLC.FusionFix.ini`, with weapon profiles in `plugins/VRWeapons/`. The VR pause tab supports height and controller-placement calibration. General FusionFix settings, including Graphics API, use `plugins/GTAIV.EFLC.FusionFix.cfg`; existing INI/backend choices are imported on the first launch without a CFG. Controller actions can be rebound through SteamVR.
 
 To play a blocked section on a flat screen, quit, set **`[VR] DisableOpenXR=1`** in the INI and relaunch. After completing the section, quit, set **`DisableOpenXR=0`** and relaunch. The old `EnableOpenXR` option is no longer used. Keep a keyboard/gamepad available. Missing or unsupported runtime/headset initialization should fall back to flat-screen play.
 

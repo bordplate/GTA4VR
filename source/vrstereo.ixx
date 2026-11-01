@@ -30,6 +30,7 @@ import common;
 import vrdiagnostics;
 import comvars;
 import settings;
+import graphicsapi;
 import openxrvr;
 import vrprofile;
 import vrcamera;
@@ -4458,7 +4459,7 @@ void VRStereo::Install()
     resolutionCapture=ini.ReadInteger("DEVELOPMENT","ProbeEyeResolution",0)!=0;
     if(!ini.ReadInteger("VR","ExperimentalStereo",0)) return;
     captured=!VRDiagnostics::automaticCaptures;
-    if(CIniReader(CSettings::d3d9cfgPath).ReadInteger("MAIN","API",0)!=0 && !OpenXRVR::UsesVulkan())
+    if(RunningGraphicsAPI()!=0 && !OpenXRVR::UsesVulkan())
     {Log("Stereo sharing requires system D3D9Ex; DXVK selected, retaining desktop"); return;}
     if(ini.ReadInteger("DEVELOPMENT","ProbeEyeViewport",0) || ini.ReadInteger("DEVELOPMENT","ProbeRenderBindings",0))
     {Log("Disable viewport/binding probes before stereo routing"); return;}

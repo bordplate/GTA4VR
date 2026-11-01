@@ -1,9 +1,16 @@
 #include <common.hxx>
 
+// Frame stages for the dev-only automation plugin (setting previews): postfx fires beforeUI,
+// the EndScene hook below afterUI. Does nothing unless that plugin registers.
+#include <automation/asi_automation_frames.h>
+ASI_AUTOMATION_FRAMES_EXPORT()
+#include "OverlayInput.hpp"
+
 import common;
 import comvars;
 import compat;
-import fusiondxhook;
+import graphicsapi;
+import vrmodupdater;
 import vrtrace;
 import openxrvr;
 import devcontrol;
@@ -61,6 +68,9 @@ void CGameProcessHook()
 
 void Init()
 {
+    // The graphics API first: before the game creates its window and its Direct3D object (graphicsapi.ixx)
+    InstallGraphicsApi();
+
     VRDiagnostics::Install();
     VRSettings::Install();
     VRD3D9Ex::Install();
@@ -102,6 +112,11 @@ void Init()
             {
                 *(LPDIRECT3DDEVICE9*)&regs.eax = *Direct3DDevice;
                 FusionFix::onEndScene().executeAll();
+                FusionFix::onAfterEndScene().executeAll();
+                // The final image, HUD and menus included, for the dev-only automation plugin
+                asi_automation_frames::Fire(ASI_AUTOMATION_STAGE_AFTER_UI, *Direct3DDevice);
+                // The in-game settings overlay on top of everything, after the automation grab (clean previews)
+                GTAIVOverlay::Present(*Direct3DDevice);
             }
         }; injector::MakeInline<AuxEndSceneHook>(pattern.get_first(0));
     }
@@ -134,6 +149,11 @@ void Init()
             {
                 *(LPDIRECT3DDEVICE9*)&regs.eax = *Direct3DDevice;
                 FusionFix::onEndScene().executeAll();
+                FusionFix::onAfterEndScene().executeAll();
+                // The final image, HUD and menus included, for the dev-only automation plugin
+                asi_automation_frames::Fire(ASI_AUTOMATION_STAGE_AFTER_UI, *Direct3DDevice);
+                // The in-game settings overlay on top of everything, after the automation grab (clean previews)
+                GTAIVOverlay::Present(*Direct3DDevice);
             }
         }; injector::MakeInline<AuxEndSceneHook>(pattern.get_first(0));
     }

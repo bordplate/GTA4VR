@@ -1703,6 +1703,13 @@ export namespace rage
                 height /= 2;
             }
 
+            else if (std::string_view(name) == "_STENCIL_BUFFER_" && desc)
+            {
+                // The fourth G-buffer target: the stencil stays in r, the motion vectors of temporal AA go to g and b
+                desc->mFormat = GRCFMT_A16B16G16R16F;
+                bitsPerPixel = 64;
+            }
+
             auto ret = shCreateRT.stdcall<grcRenderTargetPC*>(name, a2, width, height, bitsPerPixel, desc);
 
             RTCache[name] = ret;
@@ -3316,12 +3323,9 @@ public:
         pattern = find_pattern("A3 ? ? ? ? C7 05 ? ? ? ? ? ? ? ? E8 ? ? ? ? A1", "A3 ? ? ? ? C7 05 ? ? ? ? ? ? ? ? E8 ? ? ? ? 8B 0D");
         RageDirect3DDevice9::m_pRealDevice = *pattern.get_first<IDirect3DDevice9**>(1);
 
-        pattern = find_pattern("A1 ? ? ? ? 83 F8 08 74 17", "A1 ? ? ? ? 83 F8 08 74 0C");
-        // Settings' page-background hook can replace this load before the
-        // common initializer reaches it. The CE scroll-menu load references
-        // the same global and survives the settings entry hook.
-        if(pattern.empty())
-            pattern = hook::pattern("A1 ? ? ? ? 8D 0C 40 0F B7 14 CD ? ? ? ? 8B C2");
+        // CFrontEnd::CheckForBackInput, same in all versions. The menu API hooks the other reads of the menu screen
+        // that could be used here, possibly before this runs.
+        pattern = hook::pattern("A1 ? ? ? ? 83 F8 31 74 05 83 F8 3E 75 1A");
         pMenuTab = *pattern.get_first<int32_t*>(1);
 
         pattern = find_pattern("E8 ? ? ? ? 84 C0 75 44 38 05 ? ? ? ? 74 26", "E8 ? ? ? ? 84 C0 75 42 38 05");

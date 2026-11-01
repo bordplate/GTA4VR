@@ -71,6 +71,9 @@ jobs:
         cmake -S external/openxr-sdk -B build/openxr-loader-win32 -G "Visual Studio 18 2026" -A Win32 -DDYNAMIC_LOADER=ON -DBUILD_TESTS=OFF
         cmake --build build/openxr-loader-win32 --config Release --target openxr_loader --parallel 4
 
+    - name: Verify precompiled shaders
+      run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/compileshaders.ps1 -Force -Verify
+
     - name: Build
       run: msbuild -m build/GTAIV.EFLC.FusionFix.slnx /property:Configuration=Release /property:Platform=Win32
 

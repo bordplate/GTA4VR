@@ -3,7 +3,7 @@ module;
 #include <common.hxx>
 #include "libmodupdater.h"
 
-export module contributing;
+export module vrmodupdater;
 
 import common;
 import settings;

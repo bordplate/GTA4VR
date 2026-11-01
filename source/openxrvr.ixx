@@ -33,6 +33,7 @@ import vrdiagnostics;
 import vrprofile;
 import comvars;
 import settings;
+import graphicsapi;
 import vrconfig;
 
 export namespace OpenXRVR
@@ -1838,7 +1839,7 @@ void OpenXRVR::Install()
     Log("OpenXR enabled by default; [VR] DisableOpenXR=1 selects flat screen");
     if(vulkanEnabled)
     {
-        if(CIniReader(CSettings::d3d9cfgPath).ReadInteger("MAIN","API",0)!=1)
+        if(RunningGraphicsAPI()!=1)
             {Fallback("Experimental Vulkan bridge requires d3d9.cfg API=1"); return;}
         const auto diagnostic=ini.ReadString("DEVELOPMENT","VulkanDebugMode","");
         if(diagnostic=="hang" || diagnostic=="validation" || diagnostic=="markers")

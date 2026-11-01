@@ -8,6 +8,7 @@ module;
 export module vrd3d9ex;
 import common;
 import settings;
+import graphicsapi;
 import vrdiagnostics;
 
 export namespace VRD3D9Ex { void Install(); void InstallDiagnostics(); }
@@ -196,7 +197,7 @@ void VRD3D9Ex::Install()
     CIniReader ini("");
     if (!ini.ReadInteger("DEVELOPMENT", "ExperimentalD3D9Ex", 0)) return;
     // FusionFix's backend switch lives in d3d9.cfg, not the ASI INI.
-    if(CIniReader(CSettings::d3d9cfgPath).ReadInteger("MAIN","API",0)!=0)
+    if(RunningGraphicsAPI()!=0)
     {Log("Ex bridge requires system D3D9; DXVK selected",E_NOTIMPL); return;}
     runtimePacing=ini.ReadInteger("VR","DisableOpenXR",0)==0 &&
         ini.ReadInteger("VR","ExperimentalStereo",0)!=0 &&
