@@ -1,6 +1,7 @@
 module;
 #include <common.hxx>
 #include "includes/vrsettingsmodel.hpp"
+#include "includes/vrturning.hpp"
 #include <atomic>
 export module vrconfig;
 
@@ -14,6 +15,7 @@ export namespace VRConfig
     Values Read();
     bool Set(Number id,float value);
     bool Set(Flag id,bool value);
+    bool SetTurningMode(int mode);
 }
 namespace
 {
@@ -25,6 +27,8 @@ void VRConfig::Initialize()
 {
     CIniReader ini("");
     AcquireSRWLockExclusive(&configLock);
+    configured.turningMode=ini.ReadInteger("VR","TurningMode",1);
+    if(!VRTurning::ValidMode(configured.turningMode))configured.turningMode=1;
     for(unsigned i=0;i<configured.values.size();++i)
     {
         const auto& spec=VRSettingsModel::numbers[i];
@@ -70,5 +74,18 @@ bool VRConfig::Set(Flag id,bool value)
         configured.enabled[unsigned(id)]=value;revision.fetch_add(1,std::memory_order_release);
     }
     catch(...) {ReleaseSRWLockExclusive(&configLock);return false;}
+    ReleaseSRWLockExclusive(&configLock);return true;
+}
+
+bool VRConfig::SetTurningMode(int mode)
+{
+    if(!VRTurning::ValidMode(mode))return false;
+    AcquireSRWLockExclusive(&configLock);
+    try {
+        CIniReader ini("");ini.WriteInteger("VR","TurningMode",mode,true);
+        if(CIniReader("").ReadInteger("VR","TurningMode",-1)!=mode)
+        {ReleaseSRWLockExclusive(&configLock);return false;}
+        configured.turningMode=mode;revision.fetch_add(1,std::memory_order_release);
+    } catch(...) {ReleaseSRWLockExclusive(&configLock);return false;}
     ReleaseSRWLockExclusive(&configLock);return true;
 }

@@ -59,6 +59,7 @@ export namespace OpenXRVR
         float trigger[2]{};
         // Gameplay actions are independent of the finger/pose observations above.
         bool moveActive=false,moveEnabled=false,sprint=false,jump=false,interact=false;
+        bool turnActive=false;float turn[2]{};
         float move[2]{},fire=0,steer=0,steerForward=0,accelerate=0,brake=0,weaponBrake=0;
         bool fireActive=false,support=false,handbrake=false,exitVehicle=false,driving=false,horn=false;
         bool grab[2]{},grabActive[2]{};
@@ -197,7 +198,7 @@ namespace
         Steer,SteerEnable,Accelerate,Brake,Handbrake,Exit,Pause,Select,Back,PhoneOpen,PhoneDirection,PhoneClick,PhoneBack,
         PhoneUp,PhoneDown,PhoneLeft,PhoneRight,PhoneAccept,GrabLeft,GrabRight,
         DriveFire,DriveCycle,DriveDirection,DriveNext,DrivePrevious,DriveArmedBrake,DriveHorn,DrivePhoneOpen,
-        ContextInteract,DriveContextInteract,Confirm,DriveConfirm,Waypoint,ScriptDirection,ScriptClick,ScriptUp,ScriptDown,ScriptLeft,ScriptRight,ScriptAccept,ScriptBack,DriveRadioNext,DriveRadioPrevious,Count};
+        ContextInteract,DriveContextInteract,Confirm,DriveConfirm,Waypoint,ScriptDirection,ScriptClick,ScriptUp,ScriptDown,ScriptLeft,ScriptRight,ScriptAccept,ScriptBack,DriveRadioNext,DriveRadioPrevious,Turn,TurnEnable,DriveTurn,DriveTurnEnable,Count};
     XrAction actions[static_cast<unsigned>(Action::Count)]{};
     std::atomic<bool> drivingInput=false;
     std::atomic<bool> scriptMenuInput=false;
@@ -543,6 +544,10 @@ namespace
         };
         const auto boolean=XR_ACTION_TYPE_BOOLEAN_INPUT,scalar=XR_ACTION_TYPE_FLOAT_INPUT,vector=XR_ACTION_TYPE_VECTOR2F_INPUT;
         if(!game(Action::Move,gameplayActions,"move","Move",vector,0,"/input/trackpad") ||
+            !game(Action::Turn,gameplayActions,"turn","Turn view",vector,1,"/input/trackpad") ||
+            !game(Action::TurnEnable,gameplayActions,"turn_enable","Enable turning (touch)",boolean,1,"/input/trackpad/touch") ||
+            !game(Action::DriveTurn,drivingActions,"turn","Turn view",vector,1,"/input/trackpad") ||
+            !game(Action::DriveTurnEnable,drivingActions,"turn_enable","Enable turning (touch)",boolean,1,"/input/trackpad/touch") ||
             !game(Action::MoveEnable,gameplayActions,"move_enable","Enable movement (touch)",boolean,0,"/input/trackpad/touch") ||
             !game(Action::Sprint,gameplayActions,"sprint","Sprint",boolean,0,"/input/trackpad/click") ||
             !game(Action::Jump,gameplayActions,"jump","Jump",boolean,1,"/input/trackpad/click") ||
@@ -605,7 +610,8 @@ namespace
             {
                 const auto component=VRControllerBindings::Component(profile,binding.name,binding.hand,binding.component,binding.group);
                 if(component.empty())continue;
-                const std::string path=std::string(binding.hand ? "/user/hand/right":"/user/hand/left")+std::string(component);
+                const auto hand=VRControllerBindings::Hand(profile,binding.name,binding.hand);
+                const std::string path=std::string(hand ? "/user/hand/right":"/user/hand/left")+std::string(component);
                 XrPath xrPath=XR_NULL_PATH;
                 if(!Check("controller binding path",api.stringToPath(instance,path.c_str(),&xrPath)))return false;
                 bindings.push_back({binding.action,xrPath});
@@ -707,6 +713,11 @@ namespace
                     // Default side clicks select; the centre remains handbrake.
                     sample.handbrake &= !sample.cycle || std::hypot(direction[0],direction[1])<.35f;
                 }
+                bool turnActive=false,turnEnableActive=false;
+                const auto turn=getVector(sample.driving ? Action::DriveTurn:Action::Turn,&turnActive);
+                const bool turnEnabled=getBool(sample.driving ? Action::DriveTurnEnable:Action::TurnEnable,&turnEnableActive) || !turnEnableActive;
+                sample.turnActive=turnActive && !menu && !phone && !scripted && !sample.cycle;
+                if(sample.turnActive && turnEnabled) {sample.turn[0]=turn[0];sample.turn[1]=turn[1];}
                 sample.pause=getBool(Action::Pause);sample.back=getBool(Action::Back);
                 sample.contextInteract=!menu && !phone && getBool(sample.driving ? Action::DriveContextInteract : Action::ContextInteract);
                 sample.confirm=!menu && !phone && getBool(sample.driving ? Action::DriveConfirm : Action::Confirm);
@@ -718,7 +729,10 @@ namespace
                     // Reuse the phone's four-way/centre interpretation and edge
                     // transport for native script menus, without phone ownership.
                     const auto axis=getVector(Action::ScriptDirection);
-                    auto nav=sample;nav.phoneActive=true;nav.phoneClick=getBool(Action::ScriptClick);
+                    bool clickActive=false;
+                    auto nav=sample;nav.phoneActive=true;
+                    const bool clicked=getBool(Action::ScriptClick,&clickActive);
+                    nav.phoneClick=VRControllerBindings::NavigationClick(clicked,clickActive,axis[0],axis[1]);
                     nav.phoneDirection[0]=axis[0];nav.phoneDirection[1]=axis[1];
                     nav.phoneUp=getBool(Action::ScriptUp);nav.phoneDown=getBool(Action::ScriptDown);
                     nav.phoneLeft=getBool(Action::ScriptLeft);nav.phoneRight=getBool(Action::ScriptRight);
@@ -734,7 +748,10 @@ namespace
                 {
                     const auto direction=getVector(Action::PhoneDirection);
                     sample.phoneDirection[0]=direction[0];sample.phoneDirection[1]=direction[1];
-                    sample.phoneClick=getBool(Action::PhoneClick);sample.phoneBack=getBool(Action::PhoneBack);
+                    bool clickActive=false;
+                    const bool clicked=getBool(Action::PhoneClick,&clickActive);
+                    sample.phoneClick=VRControllerBindings::NavigationClick(clicked,clickActive,direction[0],direction[1]);
+                    sample.phoneBack=getBool(Action::PhoneBack);
                     sample.phoneUp=getBool(Action::PhoneUp);sample.phoneDown=getBool(Action::PhoneDown);
                     sample.phoneLeft=getBool(Action::PhoneLeft);sample.phoneRight=getBool(Action::PhoneRight);
                     sample.phoneAccept=getBool(Action::PhoneAccept);
@@ -1584,6 +1601,9 @@ std::string OpenXRVR::InputStatus()
         input.gripPosition[1][0],input.gripPosition[1][1],input.gripPosition[1][2]);
     std::string result=text;
     result.pop_back();
+    char turnInfo[128];
+    sprintf_s(turnInfo,",\"turnActive\":%s,\"turn\":[%.3f,%.3f]",input.turnActive ? "true":"false",input.turn[0],input.turn[1]);
+    result+=turnInfo;
     char fingers[160];
     sprintf_s(fingers,",\"trigger\":[%.3f,%.3f],\"triggerActive\":[%s,%s],\"padTouched\":[%s,%s]}",
         input.trigger[0],input.trigger[1],input.triggerActive[0] ? "true":"false",input.triggerActive[1] ? "true":"false",

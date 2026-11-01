@@ -9,7 +9,7 @@ namespace VRSettingsModel
     {
         PlayerHeight, VehicleEyeHeight, EyeRenderScale, HudWidth, HudDistance,
         WristSize, WristBack, WristLift, DashboardSize, DashboardForward,
-        DashboardDown, DashboardRight, DashboardTilt, BodyForward, Count
+        DashboardDown, DashboardRight, DashboardTilt, BodyForward, TurnAngle, TurnSpeed, Count
     };
     enum class Flag : unsigned { DisableOpenXR, PhysicalCrouch, ShowBody, AmmoCounters, VehiclePanelEditing, HandCalibration, Count };
     struct NumberSpec
@@ -34,7 +34,9 @@ namespace VRSettingsModel
         {"DashboardRadarDown",L"Dashboard down",L"m",.32f,-1.f,1.f,.01f,false},
         {"DashboardRadarRight",L"Dashboard right",L"m",.45f,-1.f,1.f,.01f,false},
         {"DashboardRadarTilt",L"Dashboard tilt",L"deg",12.f,-90.f,90.f,1.f,false},
-        {"FirstPersonForwardOffset",L"Body behind eyes",L"m",.08f,-.5f,.5f,.005f,false}
+        {"FirstPersonForwardOffset",L"Body behind eyes",L"m",.08f,-.5f,.5f,.005f,false},
+        {"SnapTurnAngle",L"Snap angle",L"deg",45.f,5.f,180.f,5.f,false},
+        {"ContinuousTurnSpeed",L"Turn speed",L"deg/s",90.f,10.f,360.f,10.f,false}
     }};
     inline constexpr std::array<const char*,unsigned(Flag::Count)> flags{
         "DisableOpenXR","ExperimentalPhysicalCrouch","ShowFirstPersonBody","DiegeticAmmoCounters","EditVehiclePanels","HandCalibrationMode"};
@@ -45,6 +47,7 @@ namespace VRSettingsModel
     }
     struct Values
     {
+        int turningMode=1; // 0 off, 1 snap, 2 continuous.
         std::array<float,unsigned(Number::Count)> values{};
         std::array<bool,unsigned(Flag::Count)> enabled{false,true,true,true,false,false};
         Values() {for(unsigned i=0;i<values.size();++i)values[i]=numbers[i].fallback;}

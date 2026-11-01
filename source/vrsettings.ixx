@@ -95,6 +95,31 @@ namespace
         });
         return result;
     }
+    Number TurningNumber() {return VRConfig::Read().turningMode==2 ? Number::TurnSpeed:Number::TurnAngle;}
+    bool TurningOptions(Screen screen)
+    {
+        constexpr const char* modeKey="NY_VR_TMODE",*valueKey="NY_VR_TVALUE";
+        bool ready=FusionFixSettings.AddEnum(screen,modeKey,{{0,L"Off"},{1,L"Snap"},{2,L"Continuous"}},
+            [](){return VRConfig::Read().turningMode;},[](int mode){VRConfig::SetTurningMode(mode);});
+        ready&=Text(screen,modeKey,[](){return std::wstring(L"Turning");});
+        FusionFixSettings.SetOptionPresentation(screen,modeKey,{},[](){return std::wstring(L"Turn the view with the right stick or touchpad. Snap turns once per deflection; return toward centre to turn again. Continuous turns while held. Click actions, menus and phone retain their inputs. Vehicle turning changes the view, not steering.");});
+        // Both menu ranges have 35 intervals; the same row changes meaning with the mode.
+        ready&=FusionFixSettings.AddSlider(screen,valueKey,0,35,1,[](){
+            const auto config=VRConfig::Read();const auto id=config.turningMode==2 ? Number::TurnSpeed:Number::TurnAngle;
+            const auto& spec=VRSettingsModel::numbers[unsigned(id)];
+            return std::clamp((config.Get(id)-spec.minimum)/spec.step,0.f,35.f);
+        },[](float position){
+            const auto id=TurningNumber();const auto& spec=VRSettingsModel::numbers[unsigned(id)];
+            VRConfig::Set(id,spec.minimum+position*spec.step);
+        });
+        ready&=Text(screen,valueKey,[](){return std::wstring(VRSettingsModel::numbers[unsigned(TurningNumber())].label);});
+        FusionFixSettings.SetOptionPresentation(screen,valueKey,[](){
+            const auto id=TurningNumber();const auto& spec=VRSettingsModel::numbers[unsigned(id)];
+            return std::format(L"{:.3g} {}",VRConfig::Read().Get(id),spec.unit);
+        },[](){return VRConfig::Read().turningMode==2 ? std::wstring(L"Degrees per second at full stick or pad deflection. Smaller deflections turn more slowly. Saved independently of the snap angle."):
+            std::wstring(L"Degrees rotated by each snap to the left or right. Hold does not repeat: return to centre or lift off the touchpad to rearm. Saved independently of continuous speed.");});
+        return ready;
+    }
     void Register()
     {
         if(registered.load() || registrationStarted)return;
@@ -114,6 +139,7 @@ namespace
         ready&=FusionFixSettings.AddSpacer(root);
         ready&=Button(root,"NY_VR_CENTER",L"Recenter headset",[](){VRCamera::Recenter();});
         ready&=FusionFixSettings.SetOptionPresentation(root,"NY_VR_CENTER",{},[](){return std::wstring(L"Resets the headset's game-facing reference on the next camera update. Standing-height calibration is retained.");});
+        ready&=TurningOptions(root);
         ready&=Numeric(root,Number::PlayerHeight);
         ready&=Button(root,"NY_VR_CAL",L"Calibrate standing eye height",[](){
             float height=0;

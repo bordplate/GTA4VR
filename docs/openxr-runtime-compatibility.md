@@ -59,9 +59,11 @@ Providing defaults is not a claim of tested pose/ergonomic compatibility.
 Touch defaults use the left stick to move/steer, left stick click to sprint,
 right A to jump/confirm/handbrake, right B to enter/exit/back, triggers to fire
 or accelerate/brake, and squeezes for grip. Left Menu retains tap pause/hold
-phone. Right stick click plus direction retains weapon cycling. Phone and
-script-menu navigation use the right stick with a click; A confirms and B backs
-out. Driving context interaction uses left Y. Context-dependent action-set
+phone. Right-stick deflection turns the view. On foot X selects the previous
+weapon and Y the next; while driving X cycles weapons (including unarmed), Y
+performs context interaction and right-stick click honks directly. Phone and
+script-menu navigation use right-stick deflection without clicking; A confirms
+and B backs out. Context-dependent action-set
 priorities retain menu/phone ownership. SteamVR users retain their existing
 custom action bindings; other runtimes need not provide a binding editor.
 
@@ -92,6 +94,9 @@ legacy global quaternion setting; an explicit bridge calibration overrides both
 for the current session. Removing the corresponding `Left` or `Right` entry
 restores the configured/default placement. Profiles are selected automatically
 when controllers change; no runtime-specific detection is involved.
+
+Controller turning and its shared snap-angle/continuous-speed menu control are
+described in [controller turning](controller-turning.md).
 
 ## Reporting failures
 

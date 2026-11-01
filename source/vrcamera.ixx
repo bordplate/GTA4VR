@@ -1,6 +1,7 @@
 module;
 #include <common.hxx>
 #include "includes/vrmath.hpp"
+#include "includes/vrturning.hpp"
 #include "includes/vrphoneinput.hpp"
 #include <atomic>
 #include <cstring>
@@ -90,6 +91,7 @@ namespace
     void AudioListenerDistance(SafetyHookContext& regs) {AudioListenerInput(regs,1);}
     std::atomic<bool> recenter{true};
     VRMath::Matrix referenceInverse{};
+    VRTurning::State turning;
     bool probeAnchor=false;
     bool firstPerson=false;
     bool controllerButtons=false;
@@ -1743,6 +1745,7 @@ bool VRCamera::Generate(const rage::grcViewport& base, const OpenXRVR::EyeView (
         std::memcpy(gameCamera.data(),base.mViewInverseMatrix,sizeof(gameCamera));
         if (recenter.exchange(false))
         {
+            turning={};
             float center[3]{};
             for(unsigned i=0;i<3;++i) center[i]=(eyes[0].position[i]+eyes[1].position[i])*.5f;
             // Initial prototype uses the first eye orientation as the center
@@ -1764,6 +1767,20 @@ bool VRCamera::Generate(const rage::grcViewport& base, const OpenXRVR::EyeView (
                 if(!animated && std::isfinite(rootClearance) && rootClearance>.1f && rootClearance<1.5f)
                     bodyRootAboveFloor=rootClearance;
             }
+        }
+        OpenXRVR::ControllerInput turnInput{};
+        const auto turnConfig=VRConfig::Read();
+        const bool turnAllowed=useFirstPerson && !animated && !ragdoll && !exiting &&
+            OpenXRVR::HasFocusedViews() && OpenXRVR::GetControllerInput(turnInput) && turnInput.turnActive &&
+            !turnInput.phoneActive && !turnInput.scriptMenuActive && !turnInput.handCalibration &&
+            !(CMenuManager::m_MenuActive && *CMenuManager::m_MenuActive);
+        const float turnDegrees=turning.Sample(turnConfig.turningMode,turnInput.turn[0],turnInput.turn[1],
+            turnAllowed,turnInput.sampledAt,turnConfig.Get(VRConfig::Number::TurnAngle),turnConfig.Get(VRConfig::Number::TurnSpeed));
+        if(turnDegrees!=0)
+        {
+            float midpoint[3]{};
+            for(unsigned axis=0;axis<3;++axis)midpoint[axis]=(eyes[0].position[axis]+eyes[1].position[axis])*.5f;
+            referenceInverse=VRTurning::AroundHead(referenceInverse,midpoint,turnDegrees);
         }
         if(useFirstPerson)
         {
