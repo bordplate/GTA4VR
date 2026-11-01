@@ -93,7 +93,13 @@ To play a blocked section on a flat screen, quit, set **`[VR] DisableOpenXR=1`**
 
 Development diagnostics remain off by default. Runtime selection, graphics requirements and failure reports are covered in [runtime compatibility](docs/openxr-runtime-compatibility.md) and [diagnostic settings](docs/vr-diagnostics.md).
 
-## Vive Wand controls
+## Controls
+
+**Quest / Touch controllers:** see the [Quest controller guide](docs/quest-controls.md)
+for default bindings, physical reloading, grabbing, vehicle controls, radio,
+phone and menus, including VDXR setup notes.
+
+### Vive Wand controls
 
 Bindings are named actions in SteamVR and can be customized. These are the current default gestures; an existing custom binding may need newly added actions assigned manually.
 
