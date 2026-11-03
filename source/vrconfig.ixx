@@ -16,6 +16,7 @@ export namespace VRConfig
     bool Set(Number id,float value);
     bool Set(Flag id,bool value);
     bool SetTurningMode(int mode);
+    bool SetAimingAid(int mode);
 }
 namespace
 {
@@ -27,6 +28,8 @@ void VRConfig::Initialize()
 {
     CIniReader ini("");
     AcquireSRWLockExclusive(&configLock);
+    configured.aimingAid=ini.ReadInteger("VR","AimingAid",0);
+    if(!VRSettingsModel::ValidAimingAid(configured.aimingAid))configured.aimingAid=0;
     configured.turningMode=ini.ReadInteger("VR","TurningMode",1);
     if(!VRTurning::ValidMode(configured.turningMode))configured.turningMode=1;
     for(unsigned i=0;i<configured.values.size();++i)
@@ -86,6 +89,19 @@ bool VRConfig::SetTurningMode(int mode)
         if(CIniReader("").ReadInteger("VR","TurningMode",-1)!=mode)
         {ReleaseSRWLockExclusive(&configLock);return false;}
         configured.turningMode=mode;revision.fetch_add(1,std::memory_order_release);
+    } catch(...) {ReleaseSRWLockExclusive(&configLock);return false;}
+    ReleaseSRWLockExclusive(&configLock);return true;
+}
+
+bool VRConfig::SetAimingAid(int mode)
+{
+    if(!VRSettingsModel::ValidAimingAid(mode))return false;
+    AcquireSRWLockExclusive(&configLock);
+    try {
+        CIniReader ini("");ini.WriteInteger("VR","AimingAid",mode,true);
+        if(CIniReader("").ReadInteger("VR","AimingAid",-1)!=mode)
+        {ReleaseSRWLockExclusive(&configLock);return false;}
+        configured.aimingAid=mode;revision.fetch_add(1,std::memory_order_release);
     } catch(...) {ReleaseSRWLockExclusive(&configLock);return false;}
     ReleaseSRWLockExclusive(&configLock);return true;
 }

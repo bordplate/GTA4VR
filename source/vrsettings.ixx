@@ -163,6 +163,11 @@ namespace
         ready&=FusionFixSettings.AddSpacer(root);
         for(auto id:{Number::HudWidth,Number::HudDistance,Number::WristSize,Number::WristBack,Number::WristLift})ready&=Numeric(root,id);
         ready&=Toggle(root,Flag::AmmoCounters,L"Diegetic ammo counters");
+        ready&=FusionFixSettings.AddEnum(root,"NY_VR_AIM",{{0,L"None"},{1,L"Crosshair"},{2,L"Laser sight"}},
+            [](){return VRConfig::Read().aimingAid;},[](int mode){VRConfig::SetAimingAid(mode);});
+        ready&=Text(root,"NY_VR_AIM",[](){return std::wstring(L"Aiming aid");});
+        FusionFixSettings.SetOptionPresentation(root,"NY_VR_AIM",{},[](){return std::wstring(
+            L"Optional weapon aiming aid. Crosshair marks the muzzle's central aim point; Laser sight draws a beam to it. The crosshair stays visible over scene geometry; the laser uses scene depth. Both work without the vanilla aiming stance. Weapon spread and projectile travel remain native.");});
         ready&=FusionFixSettings.AddSpacer(root);
         const auto vehicle=FusionFixSettings.AddSubmenu(root,"Vehicle camera and radar");
         if(vehicle==Screen::Invalid)return;
@@ -182,7 +187,7 @@ void VRSettings::Install()
 std::string VRSettings::Status()
 {
     const auto config=VRConfig::Read();
-    return std::format("{{\"registered\":{},\"calibration\":{},\"playerHeight\":{},\"crouchEnter\":{},\"crouchExit\":{},\"nextLaunchEyeScale\":{},\"nextLaunchDisableOpenXR\":{}}}",
+    return std::format("{{\"registered\":{},\"calibration\":{},\"playerHeight\":{},\"crouchEnter\":{},\"crouchExit\":{},\"nextLaunchEyeScale\":{},\"nextLaunchDisableOpenXR\":{},\"aimingAid\":{}}}",
         registered.load(),calibration.load(),config.Get(Number::PlayerHeight),config.Get(Number::PlayerHeight)*.65f,
-        config.Get(Number::PlayerHeight)*.75f,config.Get(Number::EyeRenderScale),config.Get(Flag::DisableOpenXR));
+        config.Get(Number::PlayerHeight)*.75f,config.Get(Number::EyeRenderScale),config.Get(Flag::DisableOpenXR),config.aimingAid);
 }

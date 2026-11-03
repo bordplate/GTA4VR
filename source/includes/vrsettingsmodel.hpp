@@ -45,8 +45,10 @@ namespace VRSettingsModel
         const auto index=unsigned(id);
         return index<numbers.size() && std::isfinite(value) && (!numbers[index].positive || value>0);
     }
+    inline bool ValidAimingAid(int mode) {return mode>=0 && mode<=2;}
     struct Values
     {
+        int aimingAid=0; // 0 none, 1 crosshair, 2 laser sight.
         int turningMode=1; // 0 off, 1 snap, 2 continuous.
         std::array<float,unsigned(Number::Count)> values{};
         std::array<bool,unsigned(Flag::Count)> enabled{false,true,true,true,false,false};

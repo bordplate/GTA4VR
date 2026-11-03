@@ -6,6 +6,7 @@ module;
 #include "includes/vrmelee.hpp"
 #include "includes/vrrecoil.hpp"
 #include "includes/vrwheel.hpp"
+#include "includes/vraimingaid.hpp"
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -43,6 +44,7 @@ export namespace VRHands
     bool GetWrist(unsigned hand,VRMath::Matrix& world);
     bool GetScopeGun(VRMath::Matrix& world);
     bool GetScopeMuzzle(const VRMath::Matrix& gun,VRMath::Vector& world);
+    bool GetAimingAid(void* entity,VRAimingAid::Snapshot& aim);
 }
 
 namespace
@@ -591,6 +593,8 @@ namespace
     MuzzleLookup muzzleLookup=nullptr;
     using WeaponRange=float (__thiscall*)(void*,void*);
     WeaponRange weaponRange=nullptr;
+    using AimQuery=bool (__cdecl*)(const float*,const float*,float,void*,void*,uint32_t,uint32_t,int,int);
+    AimQuery aimQuery=nullptr;
     std::atomic<unsigned> muzzleShots{0};
     using WeaponFire=char (__thiscall*)(void*,void*,const VRMath::Matrix*,const VRMath::Vector*,const VRMath::Vector*,
         uint32_t,uint32_t,uint32_t,uint32_t,float);
@@ -2498,6 +2502,51 @@ bool VRHands::GetScopeMuzzle(const VRMath::Matrix& gun,VRMath::Vector& world)
     for(unsigned a=0;a<3;++a) if(!std::isfinite(point[a])) return false;
     world=point;return true;
 }
+bool VRHands::GetAimingAid(void* entity,VRAimingAid::Snapshot& aim)
+{
+    // Called at the owned gun's main-eye command build, after its attachment
+    // has been updated. No game query executes on the D3D command thread.
+    if(!entity || entity!=physicsRig.held || !physicsRig.owner || !aimQuery || !muzzleLookup || !weaponRange ||
+        !OpenXRVR::HasFocusedViews() || !Active(physicsRig.owner))return false;
+    OpenXRVR::ControllerInput input{};
+    if(!OpenXRVR::GetControllerInput(input) || input.phoneActive || input.scriptMenuActive || input.handCalibration ||
+        !input.gripPoseValid[physicsRig.seated ? 0:1] || Natives::IsPauseMenuActive())return false;
+    void* held=nullptr;void* weapon=EquippedWeapon(physicsRig.owner,held);
+    if(!weapon || held!=entity || !SupportedFirearm(*reinterpret_cast<unsigned*>(static_cast<char*>(weapon)+0x18)))return false;
+    auto* frame=*reinterpret_cast<VRMath::Matrix**>(static_cast<char*>(entity)+0x20);
+    if(!frame)return false;
+    alignas(16) auto gun=VRMath::AffineXYZ(*frame);
+    alignas(16) VRMath::Vector muzzle{0,0,0,1};
+    muzzleLookup(weapon,&muzzle,&gun,3);
+    const float length=VRMath::Length3(gun[0]),range=weaponRange(weapon,physicsRig.owner);
+    if(!VRAimingAid::Finite(muzzle) || !std::isfinite(length+range) || length<1.e-5f || range<=0)return false;
+    auto target=muzzle;
+    for(unsigned a=0;a<3;++a)target[a]+=gun[0][a]*(range/length);
+    if(!VRAimingAid::Finite(target))return false;
+    alignas(16) unsigned char hit[0x60]{};
+    const uint32_t invalid=0xffffffff;
+    std::memcpy(hit+0x50,&invalid,4);std::memcpy(hit+0x54,&invalid,4);
+    VRHandPhysics::WeaponQueryScope query(physicsRig.owner,entity);
+    if(aimQuery(muzzle.data(),target.data(),0.f,physicsRig.owner,hit,0xFF,0xffffffff,1,0)) {
+        auto* instance=*reinterpret_cast<unsigned char**>(hit);
+        auto* targetPed=instance && (instance[0xA]&0x40) ? *reinterpret_cast<unsigned char**>(instance+0xC):nullptr;
+        if(targetPed && ((*reinterpret_cast<unsigned*>(targetPed+0x28)>>6)&15)==3) {
+            const auto healthFn=reinterpret_cast<float (__thiscall*)(void*)>((*reinterpret_cast<void***>(targetPed))[0xFC/4]);
+            const float health=std::max(0.f,healthFn(targetPed)-100.f);
+            const float maximum=std::max(health,*reinterpret_cast<float*>(targetPed+0xA84)-100.f);
+            aim.ped=true;
+            aim.health=VRAimingAid::Segments(maximum>0 ? 100.f*health/maximum:0.f);
+            aim.armour=VRAimingAid::Segments(*reinterpret_cast<float*>(targetPed+0xB84));
+        }
+        VRMath::Vector point{};std::memcpy(point.data(),hit+0x10,16);
+        if(!VRAimingAid::Finite(point))return false;
+        // A ray has no thickness; retain its native first-hit distance along
+        // the exact firing axis rather than displaying a lateral contact offset.
+        const float distance=std::clamp(VRMath::Dot3(VRMath::Difference3(point,muzzle),gun[0])/length,0.f,range);
+        for(unsigned a=0;a<3;++a)target[a]=muzzle[a]+gun[0][a]*(distance/length);
+    }
+    aim.muzzle=muzzle;aim.target=target;aim.valid=true;return true;
+}
 bool VRHands::GetScopeGun(VRMath::Matrix& world)
 {
     if(!OpenXRVR::HasFocusedViews()) return false;
@@ -2761,6 +2810,8 @@ void VRHands::Install()
         auto fire=hook::pattern("55 8B EC 83 E4 F0 81 EC 68 0F 00 00 A1 ? ? ? ? 33 C4 89 84 24 64 0F 00 00");
         auto muzzle=hook::pattern("55 8B EC 83 E4 F0 83 EC 18 56 8B 75 08 57 8B 7D 0C 89 4C 24 0C 8B 47 30");
         auto range=hook::pattern("FF 71 18 E8 ? ? ? ? D9 40 18 83 C4 04 C2 04 00");
+        auto aimVolume=hook::pattern("8B 4C 24 10 53 8B 5C 24 1C 56 33 F6 85 C9 74 39 8B 41 28 C1 E8 06 83 E0 0F 83 F8 03 75 17 F6 C3");
+        if(aimVolume.size()==1)aimQuery=reinterpret_cast<AimQuery>(aimVolume.get_first());
         if(fire.size()==1 && muzzle.size()==1 && range.size()==1)
         {
             muzzleLookup=reinterpret_cast<MuzzleLookup>(muzzle.get_first());

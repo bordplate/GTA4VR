@@ -277,6 +277,11 @@ namespace
         // the candidate BEFORE writing any hit, so the query still finds walls
         // and props behind it. Physical prop contacts retain CanCollide above.
         if(IsProxy(instance)) {VRDiagnostics::Increment(excludedQueries);if(selectingGrab) VRDiagnostics::Increment(grabProxyQueryRejections);return false;}
+        if(shotOwner && instance) {
+            auto* bytes=static_cast<unsigned char*>(instance);
+            void* entity=(bytes[0xA]&0x40) ? *reinterpret_cast<void**>(bytes+0xC):nullptr;
+            if(entity==shotOwner || (entity && entity==shotWeapon))return false;
+        }
         // The all-category punch sweep can encounter the owner's alternate
         // ped collision root as well as its primary root. Ignore both before
         // a closest hit is written; keep other NPCs and world blockers.

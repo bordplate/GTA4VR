@@ -95,6 +95,9 @@ Development diagnostics remain off by default. Runtime selection, graphics requi
 
 ## Controls
 
+Optional **VR → Aiming aid** offers None (default), Crosshair or Laser sight.
+See [aiming aids](docs/vr-aiming-aids.md) for behavior and limitations.
+
 Controller defaults can be edited in [`plugins/VRBindings/*.ini`](data/plugins/VRBindings)
 on any supported OpenXR runtime, including VDXR. See [binding configuration](docs/controller-bindings-ini.md).
 Restart the game after editing; existing SteamVR custom bindings can override these defaults.
