@@ -2,6 +2,8 @@
 #include <safetyhook.hpp>
 #include <intrin.h>
 #include <cstring>
+#include <vector>
+#include <algorithm>
 
 // DXVK creates its graphics objects before our first EndScene. Route only its
 // creation requests through OpenXR enable2, preserving the original create infos.
@@ -18,12 +20,17 @@ struct Creation {
     VkInstance graphicsInstance=VK_NULL_HANDLE;
     VkPhysicalDevice physical=VK_NULL_HANDLE;
     VkDevice graphicsDevice=VK_NULL_HANDLE;
+    struct GraphicsObjects {VkInstance instance;VkPhysicalDevice physical;VkDevice device;};
+    std::vector<GraphicsObjects> ownedDevices;
+    PFN_vkDestroyDevice nativeDestroyDevice=nullptr;
+    PFN_vkDestroyInstance nativeDestroyInstance=nullptr;
     XrResult result=XR_SUCCESS;
     VkResult graphicsResult=VK_SUCCESS;
     const char* problem="";
     SRWLOCK lock=SRWLOCK_INIT;
     safetyhook::InlineHook resolver{};
     HMODULE library=nullptr; // Kept while DXVK may hold returned callbacks.
+    void (*trace)(const char*,void*,bool)=nullptr;
     static inline Creation* owner=nullptr;
 
     static bool IsDxvkCaller(void* caller) {
@@ -38,15 +45,25 @@ struct Creation {
     static PFN_vkVoidFunction VKAPI_CALL Resolve(VkInstance instance,const char* name) {
         const auto original=NativeProc(instance,name);
         if(original && name) {
-            if(!std::strcmp(name,"vkCreateInstance"))return reinterpret_cast<PFN_vkVoidFunction>(CreateInstance);
-            if(!std::strcmp(name,"vkCreateDevice"))return reinterpret_cast<PFN_vkVoidFunction>(CreateDevice);
+            if(!std::strcmp(name,"vkCreateInstance")) {
+                if(owner->trace)owner->trace("resolve instance",_ReturnAddress(),false);
+                return reinterpret_cast<PFN_vkVoidFunction>(CreateInstance);
+            }
+            if(!std::strcmp(name,"vkCreateDevice")) {
+                if(owner->trace)owner->trace("resolve device",_ReturnAddress(),false);
+                return reinterpret_cast<PFN_vkVoidFunction>(CreateDevice);
+            }
+            if(!std::strcmp(name,"vkDestroyDevice"))return reinterpret_cast<PFN_vkVoidFunction>(DestroyDevice);
+            if(!std::strcmp(name,"vkDestroyInstance"))return reinterpret_cast<PFN_vkVoidFunction>(DestroyInstance);
         }
         return original;
     }
     static VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo* info,const VkAllocationCallbacks* allocator,VkInstance* output) {
         auto* self=owner;
         auto native=reinterpret_cast<PFN_vkCreateInstance>(NativeProc(VK_NULL_HANDLE,"vkCreateInstance"));
-        if(!IsDxvkCaller(_ReturnAddress()))return native(info,allocator,output);
+        const bool dxvk=IsDxvkCaller(_ReturnAddress());
+        if(self->trace)self->trace("create instance",_ReturnAddress(),dxvk);
+        if(!dxvk)return native(info,allocator,output);
         return self->CreateDxvkInstance(info,allocator,output);
     }
     VkResult CreateDxvkInstance(const VkInstanceCreateInfo* info,const VkAllocationCallbacks* allocator,VkInstance* output) {
@@ -75,7 +92,9 @@ struct Creation {
         const VkAllocationCallbacks* allocator,VkDevice* output) {
         auto* self=owner;
         auto native=self->nativeDevice;
-        if(!IsDxvkCaller(_ReturnAddress()))return native(gpu,info,allocator,output);
+        const bool dxvk=IsDxvkCaller(_ReturnAddress());
+        if(self->trace)self->trace("create device",_ReturnAddress(),dxvk);
+        if(!dxvk)return native(gpu,info,allocator,output);
         return self->CreateDxvkDevice(gpu,info,allocator,output);
     }
     VkResult CreateDxvkDevice(VkPhysicalDevice gpu,const VkDeviceCreateInfo* info,const VkAllocationCallbacks* allocator,VkDevice* output) {
@@ -88,13 +107,38 @@ struct Creation {
                 create.vulkanPhysicalDevice=gpu;create.vulkanCreateInfo=info;create.vulkanAllocator=allocator;
                 self->result=self->createDevice(self->xr,&create,output,&self->graphicsResult);
                 if(XR_SUCCEEDED(self->result) && self->graphicsResult==VK_SUCCESS) {
-                    self->graphicsDevice=*output;ReleaseSRWLockExclusive(&self->lock);return VK_SUCCESS;
+                    self->graphicsDevice=*output;
+                    self->ownedDevices.push_back({self->graphicsInstance,gpu,*output});
+                    ReleaseSRWLockExclusive(&self->lock);return VK_SUCCESS;
                 }
                 self->problem="OpenXR Vulkan device creation failed; native flat-screen creation retained";
             } else self->problem="DXVK selected a different GPU from the OpenXR runtime";
         }
         ReleaseSRWLockExclusive(&self->lock);
         return native(gpu,info,allocator,output);
+    }
+    void ForgetDevice(VkDevice device) {
+        AcquireSRWLockExclusive(&lock);
+        std::erase_if(ownedDevices,[&](const auto& objects){return objects.device==device;});
+        ReleaseSRWLockExclusive(&lock);
+    }
+    void ForgetInstance(VkInstance instance) {
+        AcquireSRWLockExclusive(&lock);
+        std::erase_if(ownedDevices,[&](const auto& objects){return objects.instance==instance;});
+        if(graphicsInstance==instance) {graphicsInstance=VK_NULL_HANDLE;physical=VK_NULL_HANDLE;graphicsDevice=VK_NULL_HANDLE;}
+        ReleaseSRWLockExclusive(&lock);
+    }
+    static void VKAPI_CALL DestroyDevice(VkDevice device,const VkAllocationCallbacks* allocator) {
+        auto* self=owner;
+        // Runtime-internal creation/cleanup can occur inside an enable2 call
+        // while our lock is held. Only DXVK owns records in this collection.
+        if(IsDxvkCaller(_ReturnAddress()))self->ForgetDevice(device);
+        self->nativeDestroyDevice(device,allocator);
+    }
+    static void VKAPI_CALL DestroyInstance(VkInstance instance,const VkAllocationCallbacks* allocator) {
+        auto* self=owner;
+        if(IsDxvkCaller(_ReturnAddress()))self->ForgetInstance(instance);
+        self->nativeDestroyInstance(instance,allocator);
     }
     bool Install(XrInstance instance,XrSystemId id,PFN_xrGetInstanceProcAddr get) {
         xr=instance;system=id;
@@ -105,7 +149,9 @@ struct Creation {
         library=LoadLibraryW(L"vulkan-1.dll");if(!library)return false;
         nativeProc=reinterpret_cast<PFN_vkGetInstanceProcAddr>(GetProcAddress(library,"vkGetInstanceProcAddr"));
         nativeDevice=reinterpret_cast<PFN_vkCreateDevice>(GetProcAddress(library,"vkCreateDevice"));
-        if(!nativeProc || !nativeDevice)return false;
+        nativeDestroyDevice=reinterpret_cast<PFN_vkDestroyDevice>(GetProcAddress(library,"vkDestroyDevice"));
+        nativeDestroyInstance=reinterpret_cast<PFN_vkDestroyInstance>(GetProcAddress(library,"vkDestroyInstance"));
+        if(!nativeProc || !nativeDevice || !nativeDestroyDevice || !nativeDestroyInstance)return false;
         owner=this;resolver=safetyhook::create_inline(nativeProc,Resolve);
         return bool(resolver);
     }
@@ -115,7 +161,15 @@ struct Creation {
     }
     bool Matches(VkInstance instance,VkPhysicalDevice gpu,VkDevice device) {
         AcquireSRWLockShared(&lock);
-        const bool matches=!*problem && graphicsInstance==instance && physical==gpu && graphicsDevice==device;
+        // A launcher/overlay may create another D3D9 device through DXVK before
+        // the game's first EndScene. It must not replace the game's ownership.
+        const bool matches=std::any_of(ownedDevices.begin(),ownedDevices.end(),[&](const auto& objects){
+            return objects.instance==instance && objects.physical==gpu && objects.device==device;
+        });
+        if(trace) {
+            trace("interop device",reinterpret_cast<void*>(device),matches);
+            trace("last created device",reinterpret_cast<void*>(graphicsDevice),matches);
+        }
         ReleaseSRWLockShared(&lock);return matches;
     }
 };

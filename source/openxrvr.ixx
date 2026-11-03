@@ -1869,6 +1869,14 @@ void OpenXRVR::Install()
         }
         if(!PrepareInstance()) {Fallback("OpenXR runtime discovery failed before DXVK creation");return;}
         vulkanCreation=new VRRuntimeVulkan::Creation;
+        if(VRDiagnostics::logging)vulkanCreation->trace=[](const char* step,void* caller,bool dxvk) {
+            HMODULE module=nullptr;wchar_t path[MAX_PATH]{};
+            GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(caller),&module);
+            if(module)GetModuleFileNameW(module,path,MAX_PATH);
+            char line[1024]{};
+            sprintf_s(line,"Vulkan startup %s caller=%p module=%ls DXVK=%d",step,caller,path,dxvk);Log(line);
+        };
         if(!vulkanCreation->Install(instance,systemId,api.getInstanceProcAddr))
         {Fallback("OpenXR Vulkan creation integration unavailable");return;}
         pendingRecreate=true; // Bind the actual game device on first EndScene.

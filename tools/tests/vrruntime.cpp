@@ -38,7 +38,7 @@ XrResult XRAPI_CALL Physical(XrInstance,const XrVulkanGraphicsDeviceGetInfoKHR*,
 }
 XrResult XRAPI_CALL Device(XrInstance,const XrVulkanDeviceCreateInfoKHR* info,VkDevice* out,VkResult* result) {
     ++xrDevices;seenDevice=info->vulkanCreateInfo;
-    *out=reinterpret_cast<VkDevice>(3);*result=VK_SUCCESS;return XR_SUCCESS;
+    *out=reinterpret_cast<VkDevice>(2+xrDevices);*result=VK_SUCCESS;return XR_SUCCESS;
 }
 }
 int main() {
@@ -55,9 +55,25 @@ int main() {
     assert(creation.CreateDxvkDevice(creation.physical,&device,nullptr,&vkDevice)==VK_SUCCESS);
     assert(seenDevice==&device && nativeDevices==0 && xrDevices==1);
     assert(creation.Matches(vkInstance,creation.physical,vkDevice));
+    const auto gameDevice=vkDevice;
+    // A second D3D9 helper device created before first EndScene cannot evict
+    // the game's OpenXR-created graphics tuple.
+    VkDevice helperDevice{};
+    assert(creation.CreateDxvkDevice(creation.physical,&device,nullptr,&helperDevice)==VK_SUCCESS);
+    assert(helperDevice!=gameDevice && xrDevices==2);
+    assert(creation.Matches(vkInstance,creation.physical,gameDevice));
+    assert(creation.Matches(vkInstance,creation.physical,helperDevice));
+    assert(!creation.Matches(reinterpret_cast<VkInstance>(9),creation.physical,gameDevice));
+    creation.ForgetDevice(helperDevice);
+    assert(!creation.Matches(vkInstance,creation.physical,helperDevice));
+    assert(creation.Matches(vkInstance,creation.physical,gameDevice));
     // A different adapter must keep flat-screen creation and reject VR use.
     assert(creation.CreateDxvkDevice(reinterpret_cast<VkPhysicalDevice>(4),&device,nullptr,&vkDevice)==VK_SUCCESS);
-    assert(nativeDevices==1 && xrDevices==1 && !creation.Matches(vkInstance,creation.physical,vkDevice));
+    assert(nativeDevices==1 && xrDevices==2);
+    assert(!creation.Matches(vkInstance,reinterpret_cast<VkPhysicalDevice>(4),vkDevice));
+    assert(creation.Matches(vkInstance,creation.physical,gameDevice));
+    creation.ForgetInstance(vkInstance);
+    assert(!creation.Matches(vkInstance,reinterpret_cast<VkPhysicalDevice>(2),gameDevice));
     creation.problem="";fail=true;
     assert(creation.CreateDxvkInstance(&instance,nullptr,&vkInstance)==VK_SUCCESS);
     assert(nativeInstances==1 && *creation.problem);

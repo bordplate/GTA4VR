@@ -50,6 +50,9 @@ selected OpenXR instance used for headset submission.
 
 ## Controller profiles
 
+For a startup failure where the VR tab loads but Vulkan interop is rejected,
+see [auxiliary DXVK device ownership](openxr-startup-device-ownership.md).
+
 Tracking, poses and semantic actions use OpenXR APIs. Suggested defaults cover
 HTC Vive Wands, Oculus Touch, Valve Index and Microsoft motion controllers.
 Unsupported profiles are skipped without preventing other profiles from binding.
