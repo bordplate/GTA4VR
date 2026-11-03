@@ -5,6 +5,9 @@ They use OpenXR and do not require SteamVR. Existing custom SteamVR bindings
 may need updating or resetting to defaults. Quest/VDXR hardware testing is
 limited; please report binding, tracking or interaction problems.
 
+To customize these defaults on VDXR, edit `plugins/VRBindings/touch.ini` and
+restart GTA IV. See [INI binding configuration](controller-bindings-ini.md).
+
 ## Movement and interaction
 
 | Action | Control |

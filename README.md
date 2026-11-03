@@ -95,6 +95,10 @@ Development diagnostics remain off by default. Runtime selection, graphics requi
 
 ## Controls
 
+Controller defaults can be edited in [`plugins/VRBindings/*.ini`](data/plugins/VRBindings)
+on any supported OpenXR runtime, including VDXR. See [binding configuration](docs/controller-bindings-ini.md).
+Restart the game after editing; existing SteamVR custom bindings can override these defaults.
+
 **Quest / Touch controllers:** see the [Quest controller guide](docs/quest-controls.md)
 for default bindings, physical reloading, grabbing, vehicle controls, radio,
 phone and menus, including VDXR setup notes.

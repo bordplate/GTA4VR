@@ -16,6 +16,7 @@ Copy-Item -LiteralPath 'readme.md','readme.fusionfix.md' -Destination 'data/GTA4
 Copy-Item -LiteralPath 'external/openxr-sdk/LICENSE' -Destination 'data/GTA4VR-notices/OpenXR-LICENSE.txt' -Force
 Copy-Item -LiteralPath 'third_party/dxvk/LICENSE' -Destination 'data/GTA4VR-notices/DXVK-LICENSE.txt' -Force
 Copy-Item -LiteralPath 'third_party/NOTICE.md' -Destination 'data/GTA4VR-notices/DEPENDENCIES.md' -Force
+Copy-Item -LiteralPath 'docs/controller-bindings-ini.md' -Destination 'data/GTA4VR-notices/Controller-bindings.md' -Force
 # Legacy backend choice imported into MAIN.GraphicsAPI on first launch without a cfg.
 Set-Content -LiteralPath 'data/d3d9.cfg' -Encoding ascii -Value "[MAIN]`r`nAPI=1"
 # Never ship the external animation ASI: VR owns weapon transforms and reloads.

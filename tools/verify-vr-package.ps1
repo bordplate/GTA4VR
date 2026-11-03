@@ -8,6 +8,9 @@ try {
     $required = @('dinput8.dll', 'd3d9.dll', 'vulkan.dll', 'd3d9.cfg',
         'plugins/GTAIV.EFLC.FusionFix.asi', 'plugins/GTAIV.EFLC.FusionFix.ini',
         'plugins/openxr_loader.dll', 'plugins/VRWeapons/pistol.ini',
+        'plugins/VRBindings/vive.ini', 'plugins/VRBindings/touch.ini',
+        'plugins/VRBindings/index.ini', 'plugins/VRBindings/motion.ini',
+        'GTA4VR-notices/Controller-bindings.md',
         'update/01.AnimatedWeaponsVanilla/weapons.img',
         'GTA4VR-notices/DXVK-LICENSE.txt', 'GTA4VR-notices/GPL-3.0.txt',
         'GTA4VR-notices/OpenXR-LICENSE.txt', 'GTA4VR-notices/AnimatedWeapons-NOTICE.md')

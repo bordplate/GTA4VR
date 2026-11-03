@@ -4,6 +4,14 @@
 
 namespace VRControllerBindings {
 enum class Profile {Vive,Touch,Index,Motion};
+inline const char* FileName(Profile profile) {
+    switch(profile) {
+    case Profile::Touch:return "touch.ini";
+    case Profile::Index:return "index.ini";
+    case Profile::Motion:return "motion.ini";
+    default:return "vive.ini";
+    }
+}
 inline unsigned Hand(Profile profile,std::string_view name,unsigned original) {
     if(profile==Profile::Touch && (name=="next_weapon" || name=="previous_weapon"))return 0;
     return original;

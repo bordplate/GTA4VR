@@ -11,6 +11,7 @@ module;
 #include <openxr/openxr_platform.h>
 #include "includes/vrruntimevulkan.hpp"
 #include "includes/vrcontrollerbindings.hpp"
+#include "includes/vrbindingconfig.hpp"
 #include "includes/vrhandcalibration.hpp"
 #include <cstdio>
 #include <cstring>
@@ -233,6 +234,7 @@ namespace
     VRRuntimeVulkan::Creation* vulkanCreation=nullptr; // Explicit process lifetime for returned Vulkan callbacks.
     XrGraphicsRequirementsVulkanKHR vulkanRequirements{XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR};
     std::string runtimeName,runtimeVersion,lastFailure;
+    std::vector<std::string> bindingWarnings;
     unsigned suggestedProfiles=0;
     std::string controllerProfiles[2];
     bool pendingRecreate = false;
@@ -519,11 +521,13 @@ namespace
             !makeSet("phone","Phone",2,phoneActions)) return false;
         if(!Check("left hand path",api.stringToPath(instance,"/user/hand/left",&handPaths[0])) ||
             !Check("right hand path",api.stringToPath(instance,"/user/hand/right",&handPaths[1]))) return false;
-        struct DefaultBinding {XrAction action;unsigned hand;std::string name,component,group;};
+        struct DefaultBinding {XrAction action;unsigned hand;std::string name,component,group,key;bool subaction;};
         std::vector<DefaultBinding> defaults;
-        auto bind=[&](XrAction action,unsigned hand,const char* name,const char* component,XrActionSet set){
-            const char* group=set==drivingActions ? "driving":set==phoneActions ? "phone":set==menuActions ? "menus":"on_foot";
-            defaults.push_back({action,hand,name,component ? component:"",group});return true;
+        auto bind=[&](XrAction action,unsigned hand,const char* name,const char* component,XrActionSet set,bool subaction){
+            const char* group=set==drivingActions ? "driving":set==phoneActions ? "phone":set==menuActions ? "menus":
+                set==systemActions ? "system":set==inputActions ? "hands":"on_foot";
+            const std::string key=std::string(name)+(subaction ? (hand ? ".right":".left"):"");
+            defaults.push_back({action,hand,name,component ? component:"",group,key,subaction});return true;
         };
         auto create=[&](XrActionSet set,const char* name,const char* label,XrActionType type,XrAction& action,
             int hand,const char* component){
@@ -531,7 +535,7 @@ namespace
             strcpy_s(info.actionName,name);strcpy_s(info.localizedActionName,label);info.actionType=type;
             if(hand<0){info.countSubactionPaths=2;info.subactionPaths=handPaths;}
             if(!Check(name,api.createAction(set,&info,&action))) return false;
-            return hand<0 ? bind(action,0,name,component,set)&&bind(action,1,name,component,set):bind(action,hand,name,component,set);
+            return hand<0 ? bind(action,0,name,component,set,true)&&bind(action,1,name,component,set,true):bind(action,hand,name,component,set,false);
         };
         if(!create(inputActions,"thumb_direction","Thumb pose direction",XR_ACTION_TYPE_VECTOR2F_INPUT,padAction,-1,"/input/trackpad") ||
             !create(inputActions,"point_pose","Pointing pose",XR_ACTION_TYPE_POSE_INPUT,aimAction,-1,"/input/aim/pose") ||
@@ -602,30 +606,55 @@ namespace
             !game(Action::Select,menuActions,"select","Select / drag",boolean,-1,"/input/trigger/click") ||
             !game(Action::Back,menuActions,"back","Back",boolean,1,"/input/menu/click")) return false;
         suggestedProfiles=0;
+        bindingWarnings.clear();
+        CIniReader bindingIni("");
+        const auto bindingFolder=bindingIni.GetIniPath().parent_path()/"VRBindings";
         for(const auto profile:{VRControllerBindings::Profile::Vive,VRControllerBindings::Profile::Touch,
             VRControllerBindings::Profile::Index,VRControllerBindings::Profile::Motion})
         {
-            std::vector<XrActionSuggestedBinding> bindings;
+            const auto fileName=VRControllerBindings::FileName(profile);
+            auto config=VRBindingConfig::File::Load(bindingFolder/fileName);
+            std::vector<XrActionSuggestedBinding> bindings,builtIn;
+            bool changed=false,pathsValid=true;
             for(const auto& binding:defaults)
             {
                 const auto component=VRControllerBindings::Component(profile,binding.name,binding.hand,binding.component,binding.group);
-                if(component.empty())continue;
                 const auto hand=VRControllerBindings::Hand(profile,binding.name,binding.hand);
-                const std::string path=std::string(hand ? "/user/hand/right":"/user/hand/left")+std::string(component);
-                XrPath xrPath=XR_NULL_PATH;
-                if(!Check("controller binding path",api.stringToPath(instance,path.c_str(),&xrPath)))return false;
-                bindings.push_back({binding.action,xrPath});
+                std::vector<std::string> fallback;
+                if(!component.empty()) {
+                    fallback.push_back(std::string(hand ? "/user/hand/right":"/user/hand/left")+std::string(component));
+                    XrPath path=XR_NULL_PATH;
+                    if(!Check("default controller binding path",api.stringToPath(instance,fallback[0].c_str(),&path)))return false;
+                    builtIn.push_back({binding.action,path});
+                }
+                const auto paths=config.Resolve(binding.group,binding.key,fallback,binding.subaction ? int(binding.hand):-1);
+                changed|=paths!=fallback;
+                for(const auto& path:paths) {
+                    XrPath xrPath=XR_NULL_PATH;
+                    if(XR_FAILED(api.stringToPath(instance,path.c_str(),&xrPath))) {pathsValid=false;continue;}
+                    bindings.push_back({binding.action,xrPath});
+                }
             }
+            config.CheckUnused();
+            for(const auto& error:config.errors)bindingWarnings.push_back(std::string(fileName)+": "+error);
             XrInteractionProfileSuggestedBinding suggest{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
             if(!Check("controller profile path",api.stringToPath(instance,VRControllerBindings::Path(profile),&suggest.interactionProfile)))return false;
             suggest.countSuggestedBindings=static_cast<uint32_t>(bindings.size());suggest.suggestedBindings=bindings.data();
-            const auto result=api.suggestBindings(instance,&suggest);
+            auto result=pathsValid ? api.suggestBindings(instance,&suggest):XR_ERROR_PATH_INVALID;
+            if(XR_FAILED(result) && changed) {
+                const auto rejected=result;
+                suggest.countSuggestedBindings=static_cast<uint32_t>(builtIn.size());suggest.suggestedBindings=builtIn.data();
+                result=api.suggestBindings(instance,&suggest);
+                if(XR_SUCCEEDED(result))bindingWarnings.push_back(std::string(fileName)+
+                    ": runtime rejected overrides ("+std::to_string(rejected)+"); built-in defaults retained for this profile");
+            }
             // Profiles are device descriptions, not runtime names. A runtime
             // need not implement every controller family we suggest.
             if(result==XR_ERROR_PATH_UNSUPPORTED)continue;
             if(!Check("controller suggested bindings",result))return false;
             ++suggestedProfiles;
         }
+        for(const auto& warning:bindingWarnings)Log(warning.c_str());
         XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
         XrActionSet sets[]{inputActions,gameplayActions,drivingActions,menuActions,systemActions,phoneActions};
         attach.countActionSets=6; attach.actionSets=sets;
@@ -1487,7 +1516,9 @@ std::string OpenXRVR::Status()
         ",\"submittedEyeHeight\":"+std::to_string(imageHeight)+",\"eyeRenderScale\":"+std::to_string(eyeRenderScale)+",\"runtime\":"+JsonText(runtimeName)+
         ",\"runtimeVersion\":"+JsonText(runtimeVersion)+",\"processBits\":32,\"controllersReady\":"+(inputReady ? "true":"false")+
         ",\"suggestedProfiles\":"+std::to_string(suggestedProfiles)+",\"controllerProfiles\":["+
-        JsonText(controllerProfiles[0])+","+JsonText(controllerProfiles[1])+"],\"lastError\":"+JsonText(lastFailure)+"}";
+        JsonText(controllerProfiles[0])+","+JsonText(controllerProfiles[1])+"],\"bindingWarnings\":[";
+    for(size_t i=0;i<bindingWarnings.size();++i) {if(i)result+=",";result+=JsonText(bindingWarnings[i]);}
+    result+="],\"lastError\":"+JsonText(lastFailure)+"}";
     return result;
 }
 

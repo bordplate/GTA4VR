@@ -50,6 +50,9 @@ selected OpenXR instance used for headset submission.
 
 ## Controller profiles
 
+All suggested defaults can be customized in per-profile INIs under
+`plugins/VRBindings`; see [binding configuration](controller-bindings-ini.md).
+
 For a startup failure where the VR tab loads but Vulkan interop is rejected,
 see [auxiliary DXVK device ownership](openxr-startup-device-ownership.md).
 

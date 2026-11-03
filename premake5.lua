@@ -152,6 +152,7 @@ workspace "GTAIV.EFLC.FusionFix"
    files { "external/injector/zydis/**.h", "external/injector/zydis/**.c" }
    files { "source/gxt/src/**.h", "source/gxt/src/**.cpp" }
    files { "data/plugins/*.ini" }
+   files { "data/plugins/VRBindings/*.ini" }
 
    filter "configurations:Debug"
       defines { "DEBUG" }
