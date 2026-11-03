@@ -63,3 +63,22 @@ alt-tab check passes with the migrated borderless window mode. Legacy window-mod
 mapping tests pass, including preservation of explicit new-format choices, and
 the settings validator accepts the new borderless default. Broader flat-screen
 gameplay and episode checks remain pending. No performance improvement is claimed.
+
+## Water/HDR hook compatibility update
+
+Upstream `ebf8626` is integrated in merge `8e060ba`, tracked in
+[#37](https://github.com/bordplate/GTA4VR/issues/37). It changes only
+`fixes.ixx` and `hdr.ixx`: the water commit hook skips the seven-byte device-mode
+comparison, and both signatures tolerate the neighboring hook's patched bytes.
+No VR-specific conflict resolution was needed. This does not establish HDR
+support in VR or resolve the separately tracked stereo-water defects.
+
+The x86 Release solution builds. A VR-opt-out launch reaches ordinary game
+callbacks with no OpenXR instance/session or stereo resources; all passive
+diagnostics remain off. The original installed INI is restored byte-for-byte
+before the VR startup check. Broader flat-screen gameplay, HDR and episode
+coverage are not claimed.
+
+The restored VR launch initializes a focused OpenXR session and both Vive
+controller profiles on CE 1.2.0.59 / SteamVR 2.18.4 / DXVK. Fresh left/right
+captures show apartment geometry at 1974×2192 per eye, with no OpenXR error.
