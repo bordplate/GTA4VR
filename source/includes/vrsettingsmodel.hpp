@@ -9,7 +9,8 @@ namespace VRSettingsModel
     {
         PlayerHeight, VehicleEyeHeight, EyeRenderScale, HudWidth, HudDistance,
         WristSize, WristBack, WristLift, DashboardSize, DashboardForward,
-        DashboardDown, DashboardRight, DashboardTilt, BodyForward, TurnAngle, TurnSpeed, Count
+        DashboardDown, DashboardRight, DashboardTilt, BodyForward, TurnAngle, TurnSpeed, MagazineHolsterLeft, MagazineHolsterDown,
+        MagazineHolsterForward, MagazineHolsterRadius, Count
     };
     enum class Flag : unsigned { DisableOpenXR, PhysicalCrouch, ShowBody, AmmoCounters, VehiclePanelEditing, HandCalibration, Count };
     struct NumberSpec
@@ -36,7 +37,11 @@ namespace VRSettingsModel
         {"DashboardRadarTilt",L"Dashboard tilt",L"deg",12.f,-90.f,90.f,1.f,false},
         {"FirstPersonForwardOffset",L"Body behind eyes",L"m",.08f,-.5f,.5f,.005f,false},
         {"SnapTurnAngle",L"Snap angle",L"deg",45.f,5.f,180.f,5.f,false},
-        {"ContinuousTurnSpeed",L"Turn speed",L"deg/s",90.f,10.f,360.f,10.f,false}
+        {"ContinuousTurnSpeed",L"Turn speed",L"deg/s",90.f,10.f,360.f,10.f,false},
+        {"MagazineHolsterLeft",L"Hip pickup left",L"m",.25f,-.5f,.75f,.01f,false},
+        {"MagazineHolsterDown",L"Hip pickup below head",L"m",.52f,0.f,1.5f,.01f,false},
+        {"MagazineHolsterForward",L"Hip pickup forward",L"m",0.f,-.75f,.75f,.01f,false},
+        {"MagazineHolsterRadius",L"Hip pickup radius",L"m",.22f,.01f,.6f,.01f,true}
     }};
     inline constexpr std::array<const char*,unsigned(Flag::Count)> flags{
         "DisableOpenXR","ExperimentalPhysicalCrouch","ShowFirstPersonBody","DiegeticAmmoCounters","EditVehiclePanels","HandCalibrationMode"};
@@ -45,9 +50,11 @@ namespace VRSettingsModel
         const auto index=unsigned(id);
         return index<numbers.size() && std::isfinite(value) && (!numbers[index].positive || value>0);
     }
+    inline bool ValidMagazinePickup(int location) {return location>=0 && location<=2;}
     inline bool ValidAimingAid(int mode) {return mode>=0 && mode<=2;}
     struct Values
     {
+        int magazinePickupLocation=2; // 0 shoulder, 1 left hip, 2 both.
         int aimingAid=0; // 0 none, 1 crosshair, 2 laser sight.
         int turningMode=1; // 0 off, 1 snap, 2 continuous.
         std::array<float,unsigned(Number::Count)> values{};

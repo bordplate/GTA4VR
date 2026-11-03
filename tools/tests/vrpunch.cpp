@@ -7,6 +7,13 @@ static void Check(bool condition)
 
 int main()
 {
+    Check(!VRPunch::ClosedFist(false,true,true,1.f,false));
+    Check(!VRPunch::ClosedFist(true,true,false,1.f,false));
+    Check(!VRPunch::ClosedFist(true,false,true,1.f,true));
+    Check(VRPunch::ClosedFist(true,true,true,.8f,false));
+    Check(!VRPunch::ClosedFist(true,true,true,.5f,false));
+    Check(VRPunch::ClosedFist(true,true,true,.5f,true));
+    Check(!VRPunch::ClosedFist(true,true,true,.3f,true));
     Check(VRPunch::FreeHand(0,0,false,false));
     Check(VRPunch::FreeHand(1,0,false,false));
     Check(VRPunch::FreeHand(0,7,true,false));

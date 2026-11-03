@@ -8,6 +8,7 @@ import common;
 import comvars;
 import settings;
 import natives;
+import vrcamera;
 
 uint8_t* (__fastcall* CControl__GetSprintValue)(uint8_t* _this, void* edx) = nullptr;
 
@@ -89,6 +90,13 @@ public:
             pattern = find_pattern("0F 2F C3 F3 0F 11 44 24 ? F3 0F 11 44 24", "0F 2F 05 ? ? ? ? F3 0F 11 4C 24 ? F3 0F 11 44 24 ? 0F 86");
             static auto SprintHook2 = safetyhook::create_mid(pattern.get_first(), [](SafetyHookContext& regs)
             {
+                // VR supplies a synthetic fresh press on each sprint read.
+                // Feeding it to the desktop hold timer restarts the tap window.
+                if (VRCamera::IsUsingVRGait())
+                {
+                    return;
+                }
+
                 static auto sprintPref = FusionFixSettings.GetRef("PREF_SPRINT");
                 if (!sprintPref->get()) // Toggle-to-sprint - leave the game alone
                 {

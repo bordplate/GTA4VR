@@ -46,6 +46,7 @@ export namespace VRReloadRuntime
 namespace
 {
     bool enabled=false;
+    enum class MagazinePickupLocation { Shoulder, LeftHip, Both };
     std::atomic<bool> vehicleMode=false;
     SafetyHookInline poseHook{},worldPoseHook{},reloadHook{},completionHook{},decisionHook{},taskHook{};
     std::atomic<void*> nativeRocketVisual=nullptr;
@@ -216,6 +217,8 @@ namespace
     bool refreshHeldPose=false;
     VRReload::Pistol ammo{};
     bool initialized=false,rightGrip=false,leftGrip=false,pulled=false;
+    bool holsterTaken=false,holsterInside=false;
+    uint64_t holsterRetryAt=0;
     std::atomic<bool> racking=false;
     VRMath::Vector rackStart{};
     VRMath::Matrix rackHandLocal{};
@@ -718,6 +721,7 @@ namespace
             else ammo.Begin(clip,total,capacity);
             ammo.tube=type==10 || type==11;ammo.pump=type==10 || type==17;
             initialized=true;previousNativeTotal=total;rightGrip=leftGrip=true;
+            holsterTaken=false;holsterInside=false;holsterRetryAt=0;
         }
         else if(total>previousNativeTotal) ammo.reserve+=total-previousNativeTotal;
         else if(total<previousNativeTotal) ammo.reserve-=std::min(ammo.reserve,previousNativeTotal-total);
@@ -753,7 +757,8 @@ namespace
         }
         const bool right=input.grabActive[1] && input.grab[1];
         const bool left=input.grabActive[0] && input.grab[0];
-        const bool showCounter=VRConfig::Read().Get(VRConfig::Flag::AmmoCounters);
+        const auto vrConfig=VRConfig::Read();
+        const bool showCounter=vrConfig.Get(VRConfig::Flag::AmmoCounters);
         if(!left || !profile.counter.editWithOffHand || !showCounter) counterEditing=false;
         if(left && showCounter && profile.counter.enabled && profile.counter.editWithOffHand && !ammo.holding &&
             (counterEditing || VRAmmoCounter::Near(profile.counter,gun,view.wrist[0][3])))
@@ -793,21 +798,77 @@ namespace
             ammo.Eject();VRDiagnostics::Increment(ejections);
             if(!ammo.holding && MakeMagazine(gun)) {dropped=true;droppedRoot=gun;dropVelocity=0;dropAt=GetTickCount64();}
         }
-        // Shoulder is defined relative to the live HMD, not startup height.
         OpenXRVR::EyeView eyes[2]{};long long display=0;
-        if(left && !leftGrip && !ammo.holding && !racking && !(type==18 && ammo.Ready()) && OpenXRVR::GetEyeViews(eyes,display))
+        const auto magazinePickupLocation=static_cast<MagazinePickupLocation>(vrConfig.magazinePickupLocation);
+        const float magazineHolsterLeft=vrConfig.Get(VRConfig::Number::MagazineHolsterLeft);
+        const float magazineHolsterDown=vrConfig.Get(VRConfig::Number::MagazineHolsterDown);
+        const float magazineHolsterForward=vrConfig.Get(VRConfig::Number::MagazineHolsterForward);
+        const float magazineHolsterRadius=vrConfig.Get(VRConfig::Number::MagazineHolsterRadius);
+        const bool looseAmmo=type==10 || type==11 || type==18;
+        const bool useShoulder=looseAmmo || magazinePickupLocation!=MagazinePickupLocation::LeftHip;
+        const bool useHip=!looseAmmo && magazinePickupLocation!=MagazinePickupLocation::Shoulder;
+        bool shoulderAttempted=false;
+        if(useShoulder && left && !leftGrip && !ammo.holding && !racking && !(type==18 && ammo.Ready()) && OpenXRVR::GetEyeViews(eyes,display))
         {
             const VRMath::Vector head{(eyes[0].position[0]+eyes[1].position[0])*.5f,
                 (eyes[0].position[1]+eyes[1].position[1])*.5f,(eyes[0].position[2]+eyes[1].position[2])*.5f,1};
             const auto leftTracking=VRMath::Transform(view.wrist[0][3],VRMath::InverseRigid(view.transform));
-            auto delta=VRMath::Difference3(leftTracking,head);
+            const auto delta=VRMath::Difference3(leftTracking,head);
             const auto headPose=VRMath::Pose(eyes[0].position,eyes[0].orientation);
-            const float behind=VRMath::Dot3(delta,headPose[2]);
-            if(VRMath::Length3(delta)<.60f && behind>.10f && leftTracking[1]>head[1]-.35f && ammo.reserve)
+            if(VRMath::Length3(delta)<.60f && VRMath::Dot3(delta,headPose[2])>.10f && leftTracking[1]>head[1]-.35f && ammo.reserve)
+            {
+                shoulderAttempted=true;
+                const auto root=HeldMagazine(gun,view);
+                if(MakeMagazine(root) && ammo.TakeMagazine())
+                {
+                    magazineOffset=VRGrip::Capture(root,view.hand[0]);
+                    if(useHip) holsterTaken=true;
+                }
+            }
+        }
+        if(useHip && (left || leftGrip || holsterInside))
+        {
+            VRMath::Vector head{},forward{},leftAxis{},center{};
+            const VRMath::Vector hand{input.gripPosition[0][0],input.gripPosition[0][1],input.gripPosition[0][2],1};
+            float distance=-1.f;
+            if(OpenXRVR::GetEyeViews(eyes,display))
+            {
+                for(unsigned axis=0;axis<3;++axis) head[axis]=(eyes[0].position[axis]+eyes[1].position[axis])*.5f;
+                const auto headPose=VRMath::Pose(eyes[0].position,eyes[0].orientation);
+                // Both poses are in OpenXR tracking metres (+Y up, -Z forward).
+                forward={-headPose[2][0],0,-headPose[2][2],0};
+                if(std::hypot(forward[0],forward[2])<.01f)
+                    forward={headPose[0][2],0,-headPose[0][0],0};
+                const float horizontal=std::hypot(forward[0],forward[2]);
+                if(horizontal>.01f)
+                {
+                    forward[0]/=horizontal;
+                    forward[2]/=horizontal;
+                    leftAxis={forward[2],0,-forward[0],0};
+                    for(unsigned axis=0;axis<3;++axis)
+                        center[axis]=head[axis]+leftAxis[axis]*magazineHolsterLeft+forward[axis]*magazineHolsterForward;
+                    center[1]-=magazineHolsterDown;
+                    distance=VRMath::Length3(VRMath::Difference3(hand,center));
+                }
+            }
+            const bool inside=distance>=0 && distance<magazineHolsterRadius;
+            if(!left || !inside) {holsterTaken=false;holsterRetryAt=0;}
+            const bool holding=ammo.holding, rack=racking.load();
+            const auto reserve=ammo.reserve;
+            const bool eligible=left && inside && !holsterTaken && !holding && !rack && reserve;
+            const auto now=GetTickCount64();
+            const bool attempted=eligible && !shoulderAttempted && now>=holsterRetryAt;
+            if(attempted)
             {
                 const auto root=HeldMagazine(gun,view);
-                if(MakeMagazine(root) && ammo.TakeMagazine()) magazineOffset=VRGrip::Capture(root,view.hand[0]);
+                if(MakeMagazine(root) && ammo.TakeMagazine())
+                {
+                    magazineOffset=VRGrip::Capture(root,view.hand[0]);
+                    holsterTaken=true;
+                }
+                holsterRetryAt=now+250;
             }
+            holsterInside=inside;
         }
         if(ammo.holding && magazineEntity)
         {

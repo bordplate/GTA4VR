@@ -44,6 +44,10 @@ namespace
         case Number::DashboardDown:return L"Moves the dashboard radar down from the seated eye anchor, in metres.";
         case Number::DashboardRight:return L"Moves the dashboard radar to the right. Negative values move it left, in metres.";
         case Number::DashboardTilt:return L"Upward tilt of the dashboard radar toward the driver, in degrees.";
+        case Number::MagazineHolsterLeft:return L"Moves the detachable-magazine pickup to the left of your current headset heading, in metres. Negative values move it right. Applies immediately.";
+        case Number::MagazineHolsterDown:return L"Distance of the hip magazine pickup below your current headset, in metres. Applies immediately.";
+        case Number::MagazineHolsterForward:return L"Moves the hip magazine pickup forward along your headset's horizontal heading. Negative values move it behind you. Applies immediately.";
+        case Number::MagazineHolsterRadius:return L"Distance your left hand can be from the hip pickup to take a magazine, in metres. Applies immediately. Shells and RPG rounds retain shoulder pickup.";
         case Number::BodyForward:return L"Moves your visible body behind the eye and controller origin, in metres. Tracking coordinates remain fixed.";
         default:return L"";
         }
@@ -162,12 +166,23 @@ namespace
         ready&=Numeric(root,Number::BodyForward);
         ready&=FusionFixSettings.AddSpacer(root);
         for(auto id:{Number::HudWidth,Number::HudDistance,Number::WristSize,Number::WristBack,Number::WristLift})ready&=Numeric(root,id);
-        ready&=Toggle(root,Flag::AmmoCounters,L"Diegetic ammo counters");
-        ready&=FusionFixSettings.AddEnum(root,"NY_VR_AIM",{{0,L"None"},{1,L"Crosshair"},{2,L"Laser sight"}},
+        ready&=FusionFixSettings.AddSpacer(root);
+        const auto weapons=FusionFixSettings.AddSubmenu(root,"Weapon configuration");
+        if(weapons==Screen::Invalid)return;
+        FusionFixSettings.SetSubmenuDescription(weapons,[](){return std::wstring(L"Configure weapon aiming aids, ammunition displays and magazine pickup locations.");});
+        ready&=Toggle(weapons,Flag::AmmoCounters,L"Diegetic ammo counters");
+        ready&=FusionFixSettings.AddEnum(weapons,"NY_VR_AIM",{{0,L"None"},{1,L"Crosshair"},{2,L"Laser sight"}},
             [](){return VRConfig::Read().aimingAid;},[](int mode){VRConfig::SetAimingAid(mode);});
-        ready&=Text(root,"NY_VR_AIM",[](){return std::wstring(L"Aiming aid");});
-        FusionFixSettings.SetOptionPresentation(root,"NY_VR_AIM",{},[](){return std::wstring(
+        ready&=Text(weapons,"NY_VR_AIM",[](){return std::wstring(L"Aiming aid");});
+        FusionFixSettings.SetOptionPresentation(weapons,"NY_VR_AIM",{},[](){return std::wstring(
             L"Optional weapon aiming aid. Crosshair marks the muzzle's central aim point; Laser sight draws a beam to it. The crosshair stays visible over scene geometry; the laser uses scene depth. Both work without the vanilla aiming stance. Weapon spread and projectile travel remain native.");});
+        ready&=FusionFixSettings.AddSpacer(weapons);
+        ready&=FusionFixSettings.AddEnum(weapons,"NY_VR_MAGP",{{0,L"Left shoulder"},{1,L"Left hip"},{2,L"Both"}},
+            [](){return VRConfig::Read().magazinePickupLocation;},[](int location){VRConfig::SetMagazinePickupLocation(location);});
+        ready&=Text(weapons,"NY_VR_MAGP",[](){return std::wstring(L"Magazine pickup location");});
+        FusionFixSettings.SetOptionPresentation(weapons,"NY_VR_MAGP",{},[](){return std::wstring(
+            L"Take detachable magazines with left grip at the shoulder, left hip, or both. Changes save and apply immediately. Shotgun shells and RPG rounds always use the shoulder.");});
+        for(auto id:{Number::MagazineHolsterLeft,Number::MagazineHolsterDown,Number::MagazineHolsterForward,Number::MagazineHolsterRadius})ready&=Numeric(weapons,id);
         ready&=FusionFixSettings.AddSpacer(root);
         const auto vehicle=FusionFixSettings.AddSubmenu(root,"Vehicle camera and radar");
         if(vehicle==Screen::Invalid)return;
@@ -187,7 +202,8 @@ void VRSettings::Install()
 std::string VRSettings::Status()
 {
     const auto config=VRConfig::Read();
-    return std::format("{{\"registered\":{},\"calibration\":{},\"playerHeight\":{},\"crouchEnter\":{},\"crouchExit\":{},\"nextLaunchEyeScale\":{},\"nextLaunchDisableOpenXR\":{},\"aimingAid\":{}}}",
+    return std::format("{{\"registered\":{},\"calibration\":{},\"playerHeight\":{},\"crouchEnter\":{},\"crouchExit\":{},\"nextLaunchEyeScale\":{},\"nextLaunchDisableOpenXR\":{},\"aimingAid\":{},\"magazinePickupLocation\":{},\"magazineHolsterLeft\":{},\"magazineHolsterDown\":{},\"magazineHolsterForward\":{},\"magazineHolsterRadius\":{}}}",
         registered.load(),calibration.load(),config.Get(Number::PlayerHeight),config.Get(Number::PlayerHeight)*.65f,
-        config.Get(Number::PlayerHeight)*.75f,config.Get(Number::EyeRenderScale),config.Get(Flag::DisableOpenXR),config.aimingAid);
+        config.Get(Number::PlayerHeight)*.75f,config.Get(Number::EyeRenderScale),config.Get(Flag::DisableOpenXR),config.aimingAid,config.magazinePickupLocation,
+        config.Get(Number::MagazineHolsterLeft),config.Get(Number::MagazineHolsterDown),config.Get(Number::MagazineHolsterForward),config.Get(Number::MagazineHolsterRadius));
 }

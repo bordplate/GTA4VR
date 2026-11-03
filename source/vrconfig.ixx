@@ -17,6 +17,7 @@ export namespace VRConfig
     bool Set(Flag id,bool value);
     bool SetTurningMode(int mode);
     bool SetAimingAid(int mode);
+    bool SetMagazinePickupLocation(int location);
 }
 namespace
 {
@@ -28,6 +29,8 @@ void VRConfig::Initialize()
 {
     CIniReader ini("");
     AcquireSRWLockExclusive(&configLock);
+    configured.magazinePickupLocation=ini.ReadInteger("VR","MagazinePickupLocation",2);
+    if(!VRSettingsModel::ValidMagazinePickup(configured.magazinePickupLocation))configured.magazinePickupLocation=2;
     configured.aimingAid=ini.ReadInteger("VR","AimingAid",0);
     if(!VRSettingsModel::ValidAimingAid(configured.aimingAid))configured.aimingAid=0;
     configured.turningMode=ini.ReadInteger("VR","TurningMode",1);
@@ -102,6 +105,19 @@ bool VRConfig::SetAimingAid(int mode)
         if(CIniReader("").ReadInteger("VR","AimingAid",-1)!=mode)
         {ReleaseSRWLockExclusive(&configLock);return false;}
         configured.aimingAid=mode;revision.fetch_add(1,std::memory_order_release);
+    } catch(...) {ReleaseSRWLockExclusive(&configLock);return false;}
+    ReleaseSRWLockExclusive(&configLock);return true;
+}
+
+bool VRConfig::SetMagazinePickupLocation(int location)
+{
+    if(!VRSettingsModel::ValidMagazinePickup(location))return false;
+    AcquireSRWLockExclusive(&configLock);
+    try {
+        CIniReader ini("");ini.WriteInteger("VR","MagazinePickupLocation",location,true);
+        if(CIniReader("").ReadInteger("VR","MagazinePickupLocation",-1)!=location)
+        {ReleaseSRWLockExclusive(&configLock);return false;}
+        configured.magazinePickupLocation=location;revision.fetch_add(1,std::memory_order_release);
     } catch(...) {ReleaseSRWLockExclusive(&configLock);return false;}
     ReleaseSRWLockExclusive(&configLock);return true;
 }

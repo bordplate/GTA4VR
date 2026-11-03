@@ -25,6 +25,12 @@ int main()
         assert(!Valid(Number(i),nan) && !Valid(Number(i),inf));
     }
     assert(!Valid(Number::Count,1));
+    assert(Values{}.magazinePickupLocation==2);
+    assert(ValidMagazinePickup(0) && ValidMagazinePickup(1) && ValidMagazinePickup(2));
+    assert(!ValidMagazinePickup(-1) && !ValidMagazinePickup(3));
+    assert(Valid(Number::MagazineHolsterLeft,-4.f));
+    assert(Valid(Number::MagazineHolsterRadius,2.f));
+    assert(!Valid(Number::MagazineHolsterRadius,0.f));
     assert(Values{}.aimingAid==0);
     assert(ValidAimingAid(0) && ValidAimingAid(1) && ValidAimingAid(2));
     assert(!ValidAimingAid(-1) && !ValidAimingAid(3));

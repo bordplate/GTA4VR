@@ -4,6 +4,11 @@
 
 namespace VRPunch
 {
+    inline bool ClosedFist(bool gripActive,bool gripped,bool triggerActive,float trigger,bool wasClosed)
+    {
+        return gripActive && gripped && triggerActive && trigger>=(wasClosed ? .4f:.7f);
+    }
+
     // Weapon ownership remains right-handed. Only the free off-hand may punch
     // with the supported standard pistol; an attached support hand is occupied.
     inline bool FreeHand(unsigned hand,uint32_t weapon,bool heldWeapon,bool supporting)

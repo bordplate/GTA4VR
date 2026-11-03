@@ -87,6 +87,8 @@ Optional web/offline installers are also provided in releases.
 
 ### Configuration and flat-screen play
 
+Use **VR → Weapon configuration → Magazine pickup location**, or set `MagazinePickupLocation` in `[VR]`. Menu changes save and apply immediately. See [weapon configuration](docs/weapon-configuration.md) for the hip offset and pickup-radius controls. Detachable magazines can be picked up at the left shoulder (`0`), left hip (`1`), or both (`2`, the default). Shotgun shells and RPG rounds are picked up at the shoulder.
+
 VR settings are in `plugins/GTAIV.EFLC.FusionFix.ini`, with weapon profiles in `plugins/VRWeapons/`. The VR pause tab supports height and controller-placement calibration. New configurations default to borderless windowed fullscreen for reliable desktop switching. General FusionFix settings, including Graphics API, use `plugins/GTAIV.EFLC.FusionFix.cfg`; existing INI/backend choices are imported on the first launch without a CFG. Controller actions can be rebound through SteamVR.
 
 To play a blocked section on a flat screen, quit, set **`[VR] DisableOpenXR=1`** in the INI and relaunch. After completing the section, quit, set **`DisableOpenXR=0`** and relaunch. The old `EnableOpenXR` option is no longer used. Keep a keyboard/gamepad available. Missing or unsupported runtime/headset initialization should fall back to flat-screen play.
@@ -95,7 +97,7 @@ Development diagnostics remain off by default. Runtime selection, graphics requi
 
 ## Controls
 
-Optional **VR → Aiming aid** offers None (default), Crosshair or Laser sight.
+Optional **VR → Weapon configuration → Aiming aid** offers None (default), Crosshair or Laser sight.
 See [aiming aids](docs/vr-aiming-aids.md) for behavior and limitations.
 
 Controller defaults can be edited in [`plugins/VRBindings/*.ini`](data/plugins/VRBindings)
@@ -117,7 +119,7 @@ Bindings are named actions in SteamVR and can be customized. These are the curre
 | Pause / phone | Tap left Menu for pause or to skip a cutscene; hold it to open the phone, including while driving. |
 | Fire / support | Right trigger fires on foot. Hold left grip near the weapon to support it. |
 | Grab | Grip near an object with a free hand; hold to retain it. |
-| Reload | Right grip ejects supported magazines; left grip over the shoulder retrieves ammunition. Insert it, then manipulate the slide/handle/pump as required by the weapon. Ejected magazine ammunition is discarded. |
+| Reload | Right grip ejects supported magazines. Use left grip at your configured pickup location to take a replacement. Insert it, then manipulate the slide/handle/pump as required by the weapon. Ejected magazine ammunition is discarded. |
 | Vehicle entry/exit | Right Menu. |
 | Driving | Right trigger accelerates; left trigger brakes/reverses. Touch left trackpad to steer, or grip the wheel. Right trackpad center click is handbrake; upper click is horn. |
 | Armed driving | Left trigger fires the left-hand weapon; left trackpad click brakes/reverses. Right trackpad side clicks select weapons, including unarmed. |

@@ -2,7 +2,7 @@
 
 Tracked in [#34](https://github.com/bordplate/GTA4VR/issues/34).
 
-Choose **VR → Aiming aid** in the pause menu:
+Choose **VR → Weapon configuration → Aiming aid** in the pause menu:
 
 | Mode | Behavior |
 | --- | --- |
