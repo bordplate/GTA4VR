@@ -3,6 +3,7 @@ module;
 #include "includes/vrmath.hpp"
 #include "includes/vrturning.hpp"
 #include "includes/vrphoneinput.hpp"
+#include "includes/vrpunch.hpp"
 #include <atomic>
 #include <cstring>
 #include <cstdio>
@@ -26,6 +27,7 @@ export namespace VRCamera
     bool RestartAnchorProbe();
     std::string MovementStatus();
     std::string ControllerMovementStatus();
+    bool IsUsingVRGait();
     std::string AimStatus();
     std::string AudioStatus();
     void SetVisibilityAvailable(bool available);
@@ -575,6 +577,8 @@ namespace
         return result;
     }
 
+    bool ControllerMoveAxes(std::array<float,2>& axes,OpenXRVR::ControllerInput* snapshot);
+
     void __fastcall WalkFacingHead(void* task,void* edx,void* owner)
     {
         bool apply=firstPersonActive && !vehicleView && !animatedView && !ragdollView &&
@@ -594,6 +598,17 @@ namespace
             NativeInvoke::GetNativeHandler(std::to_underlying(Hash::SET_CHAR_HEADING)) &&
             NativeInvoke::GetNativeHandler(std::to_underlying(Hash::SET_CHAR_DESIRED_HEADING)))
         {
+            std::array<float,2> axes{};
+            OpenXRVR::ControllerInput input{};
+            // Directional movement accepts the sprint blend but measured
+            // player travel remains at run speed. Use the stock travel-facing
+            // motor for a VR sprint request; it owns stamina and acceleration.
+            if(controllerLocomotion && ControllerMoveAxes(axes,&input) && input.sprint &&
+                std::hypot(axes[0],axes[1])>.01f)
+            {
+                ordinaryWalk.unsafe_fastcall<void>(task,edx,owner);
+                return;
+            }
             // This native locomotion callback is on the simulation thread.
             // Use native entity rotation, not a render-time matrix overwrite.
             float bodyHeading=heading;
@@ -826,7 +841,7 @@ namespace
         // Script actions work outside the first-person movement gate. Preserve
         // native input, prices, task ownership and mission-side bookkeeping.
         static VRPhoneInput::Pulse contextPulse{},confirmPulse{},scriptPulses[6]{};
-        static bool previousContext=false,previousConfirm=false,previousScript[6]{};
+        static bool previousContext=false,previousOtherContext=false,previousConfirm=false,previousScript[6]{};
         const bool wasConfirm=confirmPulse.down;
         const bool confirm=confirmPulse.Update(input.confirmPresses,input.confirm,
             inputFresh && !inMenu && !inCutscene && !input.phoneActive,now);
@@ -846,9 +861,45 @@ namespace
         scriptRawDown=scriptDown;scriptRawRising=scriptRising;
         // The gun-store ammo purchase uses INPUT_CONTEXT (23), whereas other
         // confirmations use INPUT_FRONTEND_ACCEPT (77) or raw gamepad A.
-        const bool context=contextPulse.Update(input.contextPresses,input.contextInteract,
-            inputFresh && !inMenu && !inCutscene && !input.phoneActive,now) || scriptButtons[5] || confirm;
-        mergeButton(23,context,previousContext);previousContext=context;
+        static bool contextGripHeld=false,contextGripCombat=false,contextGripRequested=false;
+        static bool discardContextUntilUp=false;
+        static uint64_t contextGripAt=0;
+        const bool contextEnabled=inputFresh && !inMenu && !inCutscene && !input.phoneActive;
+        const bool gripContextEnabled=contextEnabled && !input.driving && !scripted;
+        const bool leftGrip=input.gripActive[0] && input.gripped[0];
+        if(gripContextEnabled && leftGrip)
+        {
+            if(!contextGripHeld)
+            {
+                contextGripAt=now;
+                contextGripCombat=false;
+                contextGripRequested=false;
+            }
+            contextGripHeld=true;
+            contextGripCombat |= VRPunch::ClosedFist(input.gripActive[0],input.gripped[0],
+                input.triggerActive[0],input.trigger[0],contextGripCombat);
+            contextGripRequested |= input.contextInteract || input.contextPresses>contextPulse.consumed;
+        }
+        else if(contextGripHeld)
+        {
+            // An interrupted hold cannot emit a new edge when focus returns.
+            contextGripCombat=true;
+            discardContextUntilUp=true;
+            if(inputFresh && input.gripActive[0] && !input.gripped[0]) contextGripHeld=false;
+        }
+        const bool discardContext=discardContextUntilUp;
+        if(contextEnabled && !contextGripHeld && !input.contextInteract) discardContextUntilUp=false;
+        const bool suppressContext=contextGripHeld || discardContext;
+        const bool ordinaryContext=contextPulse.Update(input.contextPresses,input.contextInteract,
+            contextEnabled && !suppressContext,now);
+        constexpr uint64_t contextIntentMs=300;
+        const bool deliberateContext=gripContextEnabled && contextGripHeld && !contextGripCombat &&
+            contextGripRequested && now-contextGripAt>=contextIntentMs;
+        const bool context=ordinaryContext || deliberateContext;
+        const bool otherContext=scriptButtons[5] || confirm;
+        const bool discardPrevious=(contextGripHeld && contextGripCombat) || discardContext;
+        mergeButton(23,context || otherContext,(previousContext && !discardPrevious) || previousOtherContext);
+        previousContext=context;previousOtherContext=otherContext;
         constexpr unsigned scriptIds[]{65,64,66,67,77,78};
         for(unsigned i=0;i<6;++i)
         {mergeButton(scriptIds[i],scriptButtons[i],previousScript[i]);previousScript[i]=scriptButtons[i];}
@@ -993,8 +1044,8 @@ namespace
         std::memcpy(padRunControl,original,sizeof(padRunControl));
         const auto key=padRunControl[4];
         padRunControl[6]=static_cast<unsigned char>((padGait ? 255 : 0)^key);
-        // Sprint's native tap accumulator sees a fresh press while click is
-        // held. The original speed routine still owns stamina/exhaustion.
+        // Byte 7 is the previous state. Native tap mode adds to its sprint
+        // accumulator when byte 6 is pressed and byte 7 is released.
         padRunControl[7]=static_cast<unsigned char>((padGait==1 ? 255 : 0)^key);
         if(padGait==2) VRDiagnostics::Increment(padSprintReads);
         else if(padGait==1) VRDiagnostics::Increment(padJogReads);
@@ -1388,6 +1439,8 @@ std::string VRCamera::MovementStatus()
     result.pop_back();
     return result+room;
 }
+
+bool VRCamera::IsUsingVRGait() {return padGait>=0;}
 
 std::string VRCamera::ControllerMovementStatus()
 {

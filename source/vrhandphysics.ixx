@@ -92,6 +92,8 @@ namespace
     WeaponSetType weaponSetType=nullptr;
     void (__thiscall* weaponDtor)(void*)=nullptr;
     WeaponImpact weaponImpact=nullptr;
+    using MeleeContactAudio=void (__thiscall*)(void*,uint32_t,const void*);
+    MeleeContactAudio meleeContactAudio=nullptr;
     // CE B5DF50: seven stack arguments, thiscall RET 1C, float in ST0.
     using WeaponDispatch=float (__thiscall*)(void*,void*,const float*,void*,int,float,uint32_t,const float*);
     WeaponDispatch weaponDispatch=nullptr;
@@ -1164,6 +1166,21 @@ namespace
             weaponImpact(context,pose.owner,frame[0].data(),hit,applied,false);
             VRDiagnostics::Increment(meleeImpacts);
             weaponDtor(context);
+            // Vanilla's melee task submits contact audio separately from the
+            // weapon impact effects. Use the attacker-side call, which selects
+            // the Ped contact sound from the action and the original hit.
+            if(type==0 && meleeContactAudio)
+            {
+                static const auto audioHashes=[]
+                {
+                    char jab[]="MELEE_COMBAT_JAB",cross[]="MELEE_COMBAT_HOOK";
+                    return std::array{Natives::GetHashKey(jab),Natives::GetHashKey(cross)};
+                }();
+                if(const auto hash=audioHashes[hand])
+                {
+                    meleeContactAudio(static_cast<char*>(pose.owner)+0x3C0,hash,hit);
+                }
+            }
             if(auto* group=globalEventGroup())
             {
                 alignas(16) unsigned char event[0x24]{};
@@ -1580,6 +1597,11 @@ void VRHandPhysics::Install()
         if(setType.size()==1) weaponSetType=reinterpret_cast<WeaponSetType>(setType.get_first());
         auto impact=hook::pattern("55 8B EC 83 E4 F0 83 EC 78 56 57 8B 7D 10 8B F1 FF 37 E8 ? ? ? ? F3 0F 10 47 10 FF 76 18");
         if(impact.size()==1) weaponImpact=reinterpret_cast<WeaponImpact>(impact.get_first());
+        // CE CD5F55 -> 97D390, thiscall(Ped+3C0, action audio hash, hit), RET 8.
+        // action_table.csv maps Jab_Res/cross_R_Res to these game.dat16 records.
+        auto contactAudio=hook::pattern("8D 44 24 40 50 57 8D 8E C0 03 00 00 E8 ? ? ? ? 8B 45 0C 8B 48 28 81 E1 C0 03 00 00");
+        if(contactAudio.size()==1)
+            meleeContactAudio=reinterpret_cast<MeleeContactAudio>(injector::GetBranchDestination(contactAudio.get_first(12)).as_int());
         auto dispatch=hook::pattern("83 EC 30 83 C8 FF 89 44 24 04 33 C0 56 0F 57 C0 57 89 4C 24 30 C7 44 24 1C 00 00 00 00 F3 0F 11 44 24 34");
         if(dispatch.size()==1) weaponDispatch=reinterpret_cast<WeaponDispatch>(dispatch.get_first());
         auto dtor=hook::pattern("E8 ? ? ? ? DD D8 83 C4 24 8D 4C 24 10 E8 ? ? ? ? 80 4E 5C 80 5F 5E 8B E5 5D C2 04 00");
