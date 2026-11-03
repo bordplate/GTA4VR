@@ -36,4 +36,5 @@ left-hand fist. These gameplay paths were tested in-game by the PR author.
 Local checks cover x86 Release, settings validation, ammunition ownership,
 fist hysteresis and input pulses. Local VR startup, stereo output and full menu
 registration pass on CE 1.2.0.59 with Vive/Wands and SteamVR/OpenXR 2.18.4.
-Live menu interaction and episode-specific coverage remain unverified.
+Live magazine source selection, hip sliders and hip magazine acquisition also
+pass on Vive/Wands. Episode-specific coverage remains unverified.
