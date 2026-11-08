@@ -34,4 +34,7 @@ int main()
     assert(Values{}.aimingAid==0);
     assert(ValidAimingAid(0) && ValidAimingAid(1) && ValidAimingAid(2));
     assert(!ValidAimingAid(-1) && !ValidAimingAid(3));
+    assert(Values{}.firstPersonBody==1);
+    assert(ValidFirstPersonBody(0) && ValidFirstPersonBody(1) && ValidFirstPersonBody(2));
+    assert(!ValidFirstPersonBody(-1) && !ValidFirstPersonBody(3));
 }

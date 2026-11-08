@@ -2874,14 +2874,15 @@ namespace
         // Omit a worn head prop only in the local first-person eye stream.
         // Bone override +14 != -1 means an animated attachment (e.g. hand).
         alignas(16) std::array<std::byte,0x80> filtered;
-        if(buildingWornHelmet && props)
+        const auto mode=VRCamera::FirstPersonBodyMode();
+        if((buildingWornHelmet || mode==2) && props)
         {
             std::memcpy(filtered.data(),props,filtered.size());
             for(unsigned slot=0;slot<2;++slot)
             {
                 auto* record=filtered.data()+slot*0x40;
                 int type=0,bone=0;std::memcpy(&type,record,4);std::memcpy(&bone,record+0x14,4);
-                if(type==0 && bone==-1)
+                if((type==0 && bone==-1) || (mode==2 && bone==-1))
                 {const int absent=-1;std::memcpy(record+4,&absent,4);}
             }
             props=filtered.data();
@@ -2961,14 +2962,25 @@ namespace
             void* original=*table;
             std::memcpy(components.data(),original,components.size());
             const uintptr_t empty=0;
-            for(unsigned component:{0u,7u,9u,10u}) // head, hair, teeth, face
-                std::memcpy(components.data()+component*4,&empty,4);
+            const auto mode=VRCamera::FirstPersonBodyMode();
+            if(mode==2)
+            {
+                for(unsigned component=0;component<11;++component)
+                    if(component!=4u)
+                        std::memcpy(components.data()+component*4,&empty,4);
+            }
+            else
+            {
+                for(unsigned component:{0u,7u,9u,10u}) // head, hair, teeth, face
+                    std::memcpy(components.data()+component*4,&empty,4);
+            }
             *table=components.data();
             const bool previousLocal=renderingLocalBody;renderingLocalBody=true;
             playerDrawExecute.unsafe_fastcall(self,edx);
             renderingLocalBody=previousLocal;
             *table=original;
-            if(VRDiagnostics::Increment(headlessBodyCalls[renderEye])==1) Log("Headless local-player body command executed in an eye stream");
+            if(VRDiagnostics::Increment(headlessBodyCalls[renderEye])==1)
+                Log(mode==2 ? "Hands-only local-player body command executed in an eye stream" : "Headless local-player body command executed in an eye stream");
             return;
         }
         playerDrawExecute.unsafe_fastcall(self,edx);
@@ -4700,7 +4712,7 @@ void VRStereo::Install()
         if(object.size()==1) scopeObjectRender=safetyhook::create_inline(object.get_first(),ScopeObjectRender);
         Log(scopeObjectRender ? "Scope owned-object filter installed" : "Scope owned-object filter unavailable");
         VRCamera::SetVisibilityAvailable(static_cast<bool>(pedRender));
-        if(ini.ReadInteger("VR","ShowFirstPersonBody",1))
+        if(!ini.ReadInteger("VR","DisableOpenXR",0))
         {
             auto ctor=hook::pattern("53 8B D9 56 8B 43 04 C7 03 ? ? ? ? 33 05 ? ? ? ? 57 25 FF 3F 00 00");
             auto execute=hook::pattern("51 56 8B F1 57 0F B7 46 08 8B 3C 85 ? ? ? ? 8B 47 08 85 C0");
