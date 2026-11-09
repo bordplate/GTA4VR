@@ -21,7 +21,7 @@ ShowFirstPersonBody=1
 | DiagnosticCounters | Passive hand, physics, weapon, HUD, audio and visibility counters and diagnostic snapshots. |
 | DiagnosticObservationHooks | Bullet-hit health/damage, ragdoll-deactivation and movement/velocity observation hooks. Enable counters too to collect their passive measurements. |
 | DiagnosticAutomaticCaptures | Startup/device-reset eye, depth, lighting and shader readbacks. Explicit capture commands still work when this is off. |
-| ShowFirstPersonBody | First-person body with head hidden; defaults on independently of hand IK. The old DebugFirstPersonBody key is obsolete. |
+| ShowFirstPersonBody | First-person character rendering in VR: 0 off, 1 full body with head hidden, 2 hands only. The old DebugFirstPersonBody key is obsolete. |
 
 `tools/game-command.ps1 diagnostics-status` reports the loaded diagnostic flags.
 With counters disabled, passive counter/snapshot fields in other status commands

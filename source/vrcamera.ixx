@@ -33,6 +33,7 @@ export namespace VRCamera
     void SetVisibilityAvailable(bool available);
     bool HideLocalCharacter(const void* entity);
     bool ShowLocalBody(const void* entity);
+    int FirstPersonBodyMode();
     void SetHeadlessBodyAvailable(bool available);
     bool IsFirstPersonActive();
     bool GetVehicleHudAnchor(VRMath::Matrix& anchor); // World-list builder only; snapshot with eye commands.
@@ -117,7 +118,7 @@ namespace
     std::atomic<float> padSteering{0},padThrottle{0},padBrake{0};
     std::atomic<bool> firstPersonActive{false};
     bool visibilityAvailable=false;
-    std::atomic<bool> showBody{true};
+    std::atomic<int> showBody{1};
     std::atomic<bool> headlessBodyAvailable{false};
     VRMath::Matrix trackingBasis{};
     float headHeight=0;
@@ -1478,13 +1479,17 @@ bool VRCamera::RestartAnchorProbe()
 bool VRCamera::HideLocalCharacter(const void* entity)
 {
     return firstPersonActive && !scriptCameraActive && visibilityAvailable && FindPlayerPed && entity==FindPlayerPed(0) &&
-        !(showBody && headlessBodyAvailable.load());
+        !(showBody.load()!=0 && headlessBodyAvailable.load());
 }
 
 bool VRCamera::ShowLocalBody(const void* entity)
 {
-    return firstPersonActive && !scriptCameraActive && visibilityAvailable && showBody && headlessBodyAvailable.load() &&
+    return firstPersonActive && !scriptCameraActive && visibilityAvailable && (showBody.load()!=0) && headlessBodyAvailable.load() &&
         FindPlayerPed && entity==FindPlayerPed(0);
+}
+int VRCamera::FirstPersonBodyMode()
+{
+    return showBody.load();
 }
 void VRCamera::SetHeadlessBodyAvailable(bool available) {headlessBodyAvailable=available;}
 
@@ -1507,7 +1512,7 @@ std::string VRCamera::AudioStatus()
 void VRCamera::Install()
 {
     CIniReader ini("");
-    showBody=ini.ReadInteger("VR","ShowFirstPersonBody",1)!=0;
+    showBody=std::clamp(ini.ReadInteger("VR","ShowFirstPersonBody",1),0,2);
     probeAnchor=ini.ReadInteger("DEVELOPMENT","ProbeFirstPersonAnchor",0)!=0;
     probeSamples=std::clamp(ini.ReadInteger("DEVELOPMENT","FirstPersonProbeSamples",8),1,240);
     firstPerson=ini.ReadInteger("VR","ExperimentalFirstPerson",0)!=0;
@@ -1746,7 +1751,7 @@ bool VRCamera::Generate(const rage::grcViewport& base, const OpenXRVR::EyeView (
     {
         const auto config=VRConfig::Read();
         vehicleEyeHeightOffset=config.Get(VRConfig::Number::VehicleEyeHeight);
-        showBody=config.Get(VRConfig::Flag::ShowBody);
+        showBody=config.firstPersonBody;
         viewConfigRevision=revision;
     }
     vehicleHudValid=false;

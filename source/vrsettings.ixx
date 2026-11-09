@@ -161,7 +161,13 @@ namespace
             }
         });
         ready&=Toggle(root,Flag::PhysicalCrouch,L"Physical crouch");
-        ready&=Toggle(root,Flag::ShowBody,L"Show first-person body");
+        constexpr const char* bodyKey="NY_VR_BODYMODE";
+        ready&=FusionFixSettings.AddEnum(root,bodyKey,{{0,L"Off"},{1,L"Full body"},{2,L"Hands only"}},
+            [](){return VRConfig::Read().firstPersonBody;},[](int mode){VRConfig::SetFirstPersonBody(mode);});
+        ready&=Text(root,bodyKey,[](){return std::wstring(L"First-person body");});
+        FusionFixSettings.SetOptionPresentation(root,bodyKey,{},[](){
+            return std::wstring(L"First-person character rendering in VR. Off hides the local player. Full body shows the tracked torso, legs and arms with head hidden. Hands only shows floating hands without torso or arm meshes.");
+        });
         ready&=Toggle(root,Flag::HandCalibration,L"Calibrate controller placement");
         ready&=Numeric(root,Number::BodyForward);
         ready&=FusionFixSettings.AddSpacer(root);
@@ -202,8 +208,8 @@ void VRSettings::Install()
 std::string VRSettings::Status()
 {
     const auto config=VRConfig::Read();
-    return std::format("{{\"registered\":{},\"calibration\":{},\"playerHeight\":{},\"crouchEnter\":{},\"crouchExit\":{},\"nextLaunchEyeScale\":{},\"nextLaunchDisableOpenXR\":{},\"aimingAid\":{},\"magazinePickupLocation\":{},\"magazineHolsterLeft\":{},\"magazineHolsterDown\":{},\"magazineHolsterForward\":{},\"magazineHolsterRadius\":{}}}",
+    return std::format("{{\"registered\":{},\"calibration\":{},\"playerHeight\":{},\"crouchEnter\":{},\"crouchExit\":{},\"nextLaunchEyeScale\":{},\"nextLaunchDisableOpenXR\":{},\"firstPersonBody\":{},\"aimingAid\":{},\"magazinePickupLocation\":{},\"magazineHolsterLeft\":{},\"magazineHolsterDown\":{},\"magazineHolsterForward\":{},\"magazineHolsterRadius\":{}}}",
         registered.load(),calibration.load(),config.Get(Number::PlayerHeight),config.Get(Number::PlayerHeight)*.65f,
-        config.Get(Number::PlayerHeight)*.75f,config.Get(Number::EyeRenderScale),config.Get(Flag::DisableOpenXR),config.aimingAid,config.magazinePickupLocation,
+        config.Get(Number::PlayerHeight)*.75f,config.Get(Number::EyeRenderScale),config.Get(Flag::DisableOpenXR),config.firstPersonBody,config.aimingAid,config.magazinePickupLocation,
         config.Get(Number::MagazineHolsterLeft),config.Get(Number::MagazineHolsterDown),config.Get(Number::MagazineHolsterForward),config.Get(Number::MagazineHolsterRadius));
 }
