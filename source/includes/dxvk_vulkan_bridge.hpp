@@ -23,10 +23,10 @@ struct Bridge {
     VkDevice device{};
     VkQueue queue{};
     uint32_t family=0,index=0,width=0,height=0;
-    VkCommandPool pool{};
-    VkCommandBuffer command{};
-    VkFence fence{};
-    bool pending=false;
+    VkCommandPool pools[2]{};
+    VkCommandBuffer commands[2]{};
+    VkFence fences[2]{};
+    bool pending[2]{};
     HMODULE loader=nullptr;
     PFN_vkGetInstanceProcAddr instanceProc=nullptr;
     PFN_vkGetDeviceProcAddr deviceProc=nullptr;
@@ -64,13 +64,16 @@ struct Bridge {
 #define LOAD_BRIDGE(name) name=reinterpret_cast<PFN_vk##name>(deviceProc(device,"vk" #name)); if(!name) return false;
         BRIDGE_FUNCTIONS(LOAD_BRIDGE)
 #undef LOAD_BRIDGE
-        VkCommandPoolCreateInfo create{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO}; create.queueFamilyIndex=family;
-        if(CreateCommandPool(device,&create,nullptr,&pool)!=VK_SUCCESS) return false;
-        VkCommandBufferAllocateInfo allocation{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-        allocation.commandPool=pool; allocation.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; allocation.commandBufferCount=1;
-        if(AllocateCommandBuffers(device,&allocation,&command)!=VK_SUCCESS) return false;
-        VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-        return CreateFence(device,&fenceInfo,nullptr,&fence)==VK_SUCCESS;
+        for(unsigned eye=0;eye<2;++eye) {
+            VkCommandPoolCreateInfo create{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO}; create.queueFamilyIndex=family;
+            if(CreateCommandPool(device,&create,nullptr,&pools[eye])!=VK_SUCCESS) return false;
+            VkCommandBufferAllocateInfo allocation{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+            allocation.commandPool=pools[eye]; allocation.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; allocation.commandBufferCount=1;
+            if(AllocateCommandBuffers(device,&allocation,&commands[eye])!=VK_SUCCESS) return false;
+            VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+            if(CreateFence(device,&fenceInfo,nullptr,&fences[eye])!=VK_SUCCESS) return false;
+        }
+        return true;
     }
     bool SetTextures(IDirect3DTexture9* const (&images)[2],unsigned w,unsigned h) {
         using Info=HRESULT(STDMETHODCALLTYPE*)(IUnknown*,VkImage*,VkImageLayout*,VkImageCreateInfo*);
@@ -96,8 +99,17 @@ struct Bridge {
         using F=void(STDMETHODCALLTYPE*)(IUnknown*);
         Method<F>(interop.Get(),6)(interop.Get());
     }
+    bool Wait(unsigned eye) {
+        if(pending[eye] && WaitForFences(device,1,&fences[eye],VK_TRUE,1'000'000'000)!=VK_SUCCESS) return false;
+        pending[eye]=false; return true;
+    }
+    // Submit this frame's rendering, then wait for the previous frame's copies.
+    // Call once per frame before Copy; running further ahead varies the pose age.
+    bool WaitPrevious() {Flush(); return Wait(0) && Wait(1);}
+    // Not waited on here: the barriers order the copy after this frame's rendering
+    // and before later work, and OpenXR only needs it submitted to this queue.
     bool Copy(unsigned eye,VkImage target) {
-        if(eye>1 || !target || !sources[eye] || pending) return false;
+        if(eye>1 || !target || !sources[eye] || !Wait(eye)) return false;
         // DXVK can relocate a resource's Vulkan backing storage. Keeping the
         // D3D9 texture alive does not pin the VkImage obtained on the first
         // frame. Resolve it after pending producer commands, for every copy.
@@ -107,25 +119,20 @@ struct Bridge {
             &sources[eye],&layouts[eye],nullptr)) || !sources[eye]) return false;
         Transition(eye,layouts[eye],VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         Flush();
-        using Wait=bool(STDMETHODCALLTYPE*)(IUnknown*,IDirect3DResource9*,DWORD);
-        const auto wait=Method<Wait>(interop.Get(),11);
-        const auto deadline=GetTickCount64()+1000;
-        bool ready=false;
-        do {
-            ready=wait(interop.Get(),textures[eye].Get(),D3DLOCK_READONLY|D3DLOCK_DONOTWAIT);
-            if(!ready) Sleep(0);
-        } while(!ready && GetTickCount64()<deadline);
-        if(!ready) {Transition(eye,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,layouts[eye]);Flush();return false;}
         const auto restore=[&](){Transition(eye,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,layouts[eye]);Flush();};
-        if(ResetCommandPool(device,pool,0)!=VK_SUCCESS || ResetFences(device,1,&fence)!=VK_SUCCESS) {restore();return false;}
+        const auto command=commands[eye];
+        if(ResetCommandPool(device,pools[eye],0)!=VK_SUCCESS || ResetFences(device,1,&fences[eye])!=VK_SUCCESS) {restore();return false;}
         VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO}; begin.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         if(BeginCommandBuffer(command,&begin)!=VK_SUCCESS) {restore();return false;}
+        VkMemoryBarrier frameWrites{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        frameWrites.srcAccessMask=VK_ACCESS_MEMORY_WRITE_BIT;
+        frameWrites.dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT|VK_ACCESS_TRANSFER_WRITE_BIT;
         VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         barrier.srcQueueFamilyIndex=barrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
         barrier.image=target; barrier.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
         barrier.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; barrier.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         barrier.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
-        CmdPipelineBarrier(command,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&barrier);
+        CmdPipelineBarrier(command,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,1,&frameWrites,0,nullptr,1,&barrier);
         VkImageCopy region{}; region.srcSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
         region.dstSubresource=region.srcSubresource; region.extent={width,height,1};
         CmdCopyImage(command,sources[eye],VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,target,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&region);
@@ -135,24 +142,23 @@ struct Bridge {
         CmdPipelineBarrier(command,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,0,0,nullptr,0,nullptr,1,&barrier);
         if(EndCommandBuffer(command)!=VK_SUCCESS) {restore();return false;}
         VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO}; submit.commandBufferCount=1; submit.pCommandBuffers=&command;
-        const auto submitted=WithQueue([&](){return QueueSubmit(queue,1,&submit,fence);});
+        const auto submitted=WithQueue([&](){return QueueSubmit(queue,1,&submit,fences[eye]);});
         if(submitted!=VK_SUCCESS) {restore();return false;}
-        pending=true;
-        const auto completed=WaitForFences(device,1,&fence,VK_TRUE,1'000'000'000);
-        if(completed!=VK_SUCCESS && completed!=VK_ERROR_DEVICE_LOST) return false;
-        pending=false;
-        if(completed!=VK_SUCCESS) return false;
+        pending[eye]=true;
         restore(); return true;
     }
     bool Destroy() {
-        if(pending) {
-            const auto done=WaitForFences(device,1,&fence,VK_TRUE,1'000'000'000);
+        for(unsigned eye=0;eye<2;++eye) {
+            if(!pending[eye]) continue;
+            const auto done=WaitForFences(device,1,&fences[eye],VK_TRUE,1'000'000'000);
             if(done!=VK_SUCCESS && done!=VK_ERROR_DEVICE_LOST) return false;
-            pending=false;
+            pending[eye]=false;
         }
-        if(fence) DestroyFence(device,fence,nullptr);
-        if(pool) DestroyCommandPool(device,pool,nullptr);
-        fence=VK_NULL_HANDLE; pool=VK_NULL_HANDLE; command=VK_NULL_HANDLE;
+        for(unsigned eye=0;eye<2;++eye) {
+            if(fences[eye]) DestroyFence(device,fences[eye],nullptr);
+            if(pools[eye]) DestroyCommandPool(device,pools[eye],nullptr);
+            fences[eye]=VK_NULL_HANDLE; pools[eye]=VK_NULL_HANDLE; commands[eye]=VK_NULL_HANDLE;
+        }
         for(unsigned i=0;i<2;++i) {textureInterop[i].Reset();textures[i].Reset();sources[i]=0;}
         interop.Reset(); instance=nullptr; physical=nullptr; device=nullptr; queue=nullptr;
         if(loader) FreeLibrary(loader); loader=nullptr;
