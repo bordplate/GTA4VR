@@ -1299,6 +1299,11 @@ namespace
         const XrCompositionLayerBaseHeader* layers[2]{};
         bool copied=haveEyeImages && state.shouldRender && !panelActive;
         gameplayPacing=haveEyeImages && state.shouldRender;
+        if(copied && vulkanEnabled)
+        {
+            VRProfile::Scope profile(VRProfile::Metric::EyePacingWait);
+            if(!vulkanBridge || !vulkanBridge->WaitPrevious()) copied=false;
+        }
         for(unsigned eye=0;eye<2 && copied;++eye)
         {
             VRProfile::Scope profile(eye ? VRProfile::Metric::XRCopy1 : VRProfile::Metric::XRCopy0);
@@ -1404,7 +1409,8 @@ namespace
                 {Fallback("Panel image wait failed");return;}
             bool done=false;
             if(vulkanEnabled)
-                done=index<panelChain->vulkanImages.size() && panelBridge->Copy(0,panelChain->vulkanImages[index].image);
+                done=index<panelChain->vulkanImages.size() && panelBridge->WaitPrevious() &&
+                    panelBridge->Copy(0,panelChain->vulkanImages[index].image);
             else if(index<panelChain->images.size())
             {
                 context->CopyResource(panelChain->images[index].texture,panelChain->shared.Get());

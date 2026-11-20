@@ -24,7 +24,7 @@ export namespace VRProfile
         Eye0Routing, Eye1Routing, FrameOutsideEyes, InterEyeGap,
         RenderBeforeXRWait, XRBegin, XRLocateViews, XRQueueBegin, XRQueueAcquire,
         XRQueueRelease, XRQueueEnd, XRFrameWall, PosePredictionLag, AmbientOcclusion,
-        Eye0VertexConstants, Eye1VertexConstants, Eye0PixelConstants, Eye1PixelConstants, Count };
+        Eye0VertexConstants, Eye1VertexConstants, Eye0PixelConstants, Eye1PixelConstants, EyePacingWait, Count };
     struct Stamp { long long ticks=0; unsigned epoch=0; };
     struct Total { unsigned epoch=0; double ms=0; };
     Stamp Begin();
@@ -85,7 +85,7 @@ namespace
         "eye0Routing","eye1Routing","frameOutsideEyes","interEyeGap",
         "renderBeforeXRWait","xrBegin","xrLocateViews","xrQueueBegin","xrQueueAcquire",
         "xrQueueRelease","xrQueueEnd","xrFrameWall","posePredictionLag","ambientOcclusion",
-        "eye0VertexConstants","eye1VertexConstants","eye0PixelConstants","eye1PixelConstants"};
+        "eye0VertexConstants","eye1VertexConstants","eye0PixelConstants","eye1PixelConstants","eyePacingWait"};
     static_assert(std::size(names)==static_cast<unsigned>(VRProfile::Metric::Count));
     struct Samples { std::array<double,capacity> values{}; unsigned count=0,dropped=0; };
     std::array<Samples,std::size(names)> samples;
